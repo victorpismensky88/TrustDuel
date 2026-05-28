@@ -269,7 +269,8 @@ export default function App() {
   const [authStatusText, setAuthStatusText] = useState<string>("Запуск защищенного защитного шлюза...");
 
   // Navigation & Interactive Pages State
-  const [activeTab, setActiveTab] = useState<"account" | "history" | "play" | "deposit" | "withdraw">("play");
+  const [activeTab, setActiveTab] = useState<"account" | "history" | "play" | "finance" | "rules">("rules");
+  const [financeSubTab, setFinanceSubTab] = useState<"deposit" | "withdraw">("deposit");
   const [depositAmount, setDepositAmount] = useState<number>(25);
   const [customDeposit, setCustomDeposit] = useState<string>("");
   const [isDepositing, setIsDepositing] = useState<boolean>(false);
@@ -283,7 +284,6 @@ export default function App() {
   const [withdrawStep, setWithdrawStep] = useState<number>(0);
   const [withdrawLogs, setWithdrawLogs] = useState<string[]>([]);
   const [withdrawStatus, setWithdrawStatus] = useState<string>("");
-  const [showRules, setShowRules] = useState<boolean>(false);
 
   React.useEffect(() => {
     const webApp = (window as any).Telegram?.WebApp;
@@ -713,7 +713,7 @@ export default function App() {
 
           <div className="flex flex-wrap items-center gap-3 mt-2 md:mt-0">
             <button
-              onClick={() => { triggerHaptic('light'); setShowRules(true); }}
+              onClick={() => { triggerHaptic('light'); setActiveTab("rules"); }}
               className="px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-lg border border-indigo-500/25 bg-indigo-550/10 text-indigo-400 hover:bg-indigo-600/20 hover:text-white transition-all select-none cursor-pointer flex items-center gap-2 shadow-md"
             >
               <BookOpen size={13} /> Правила игры
@@ -728,7 +728,7 @@ export default function App() {
         </header>
 
         {/* Global Statistics Grid */}
-        {(activeTab === "play" || activeTab === "account") && (
+        {(activeTab === "account" || activeTab === "finance" || activeTab === "history") && (
           <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
             <StatCard icon={Coins} label="Баланс" value={fmt(balance)} sub="демо-счёт" />
             <StatCard icon={Users} label="Твои игры" value={playerGames} sub="сыгранные раунды" />
@@ -1163,12 +1163,40 @@ export default function App() {
               </div>
             )}
 
-            {/* Deposit page */}
-            {activeTab === "deposit" && (
+            {/* Finance combined page */}
+            {activeTab === "finance" && (
               <div className="mx-auto max-w-xl rounded-2xl border border-white/10 bg-slate-800/40 p-5 shadow-2xl backdrop-blur-md md:p-6 relative overflow-hidden">
-                <div className="absolute top-0 inset-x-0 h-[1.5px] bg-gradient-to-r from-transparent via-emerald-500/50 to-transparent"></div>
-                
-                <div className="mb-5 flex items-center justify-between pb-3 border-b border-white/5">
+                <div className={`absolute top-0 inset-x-0 h-[1.5px] bg-gradient-to-r from-transparent ${financeSubTab === "deposit" ? "via-emerald-500/50" : "via-rose-500/50"} to-transparent`}></div>
+
+                {/* Unified finance sub-tab switcher */}
+                <div className="flex p-0.5 bg-slate-950/70 rounded-xl border border-white/5 mb-5 select-none text-center">
+                  <button
+                    onClick={() => { triggerHaptic('light'); setFinanceSubTab("deposit"); }}
+                    className={`flex-1 py-1.5 text-[11px] font-bold uppercase tracking-wider rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                      financeSubTab === "deposit"
+                        ? "bg-slate-900 border border-white/10 text-[#10b981] shadow-md shadow-emerald-950/20"
+                        : "text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    <ArrowDownLeft size={13} />
+                    Пополнить
+                  </button>
+                  <button
+                    onClick={() => { triggerHaptic('light'); setFinanceSubTab("withdraw"); }}
+                    className={`flex-1 py-1.5 text-[11px] font-bold uppercase tracking-wider rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                      financeSubTab === "withdraw"
+                        ? "bg-slate-900 border border-white/10 text-[#f43f5e] shadow-md shadow-rose-950/20"
+                        : "text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    <ArrowUpRight size={13} />
+                    Вывод
+                  </button>
+                </div>
+
+                {financeSubTab === "deposit" ? (
+                  <div className="animate-fade-in">
+                    <div className="mb-5 flex items-center justify-between pb-3 border-b border-white/5">
                   <div>
                     <div className="text-[10px] font-bold uppercase tracking-widest text-[#10b981] font-mono">Merchant Payment</div>
                     <h3 className="text-xl font-black text-white tracking-tight uppercase mt-1 flex items-center gap-2">
@@ -1263,28 +1291,23 @@ export default function App() {
                   </div>
                 )}
 
-                <ActionButton onClick={handleDeposit} disabled={isDepositing} variant="green" icon={ArrowDownLeft}>
-                  {isDepositing ? "Выполнение шлюзового запроса..." : `Начислить $${customDeposit ? Number(customDeposit).toFixed(2) : depositAmount.toFixed(2)}`}
-                </ActionButton>
-              </div>
-            )}
-
-            {/* Withdraw page */}
-            {activeTab === "withdraw" && (
-              <div className="mx-auto max-w-xl rounded-2xl border border-white/10 bg-slate-800/40 p-5 shadow-2xl backdrop-blur-md md:p-6 relative overflow-hidden">
-                <div className="absolute top-0 inset-x-0 h-[1.5px] bg-gradient-to-r from-transparent via-[#f43f5e]/50 to-transparent"></div>
-                
-                <div className="mb-5 flex items-center justify-between pb-3 border-b border-white/5">
-                  <div>
-                    <div className="text-[10px] font-bold uppercase tracking-widest text-[#f43f5e] font-mono">Blockchain Gateway</div>
-                    <h3 className="text-xl font-black text-white tracking-tight uppercase mt-1 flex items-center gap-2">
-                      <ArrowUpRight size={18} className="text-[#f43f5e]" /> Вывести средства
-                    </h3>
+                    <ActionButton onClick={handleDeposit} disabled={isDepositing} variant="green" icon={ArrowDownLeft}>
+                      {isDepositing ? "Выполнение шлюзового запроса..." : `Начислить $${customDeposit ? Number(customDeposit).toFixed(2) : depositAmount.toFixed(2)}`}
+                    </ActionButton>
                   </div>
-                  <div className="text-right">
-                    <div className="text-[9px] text-slate-400 uppercase font-mono">Баланс доступно</div>
-                    <div className="text-lg font-black text-[#f43f5e] font-mono leading-none mt-1">{fmt(balance)}</div>
-                  </div>
+                ) : (
+                  <div className="animate-fade-in">
+                    <div className="mb-5 flex items-center justify-between pb-3 border-b border-white/5">
+                      <div>
+                        <div className="text-[10px] font-bold uppercase tracking-widest text-[#f43f5e] font-mono">Blockchain Gateway</div>
+                        <h3 className="text-xl font-black text-white tracking-tight uppercase mt-1 flex items-center gap-2">
+                          <ArrowUpRight size={18} className="text-[#f43f5e]" /> Вывести средства
+                        </h3>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-[9px] text-slate-400 uppercase font-mono">Баланс доступно</div>
+                        <div className="text-lg font-black text-[#f43f5e] font-mono leading-none mt-1">{fmt(balance)}</div>
+                      </div>
                 </div>
 
                 <p className="text-xs text-slate-350 leading-relaxed mb-5">
@@ -1399,6 +1422,74 @@ export default function App() {
                 <ActionButton onClick={handleWithdraw} disabled={isWithdrawing} variant="red" icon={ArrowUpRight}>
                   {isWithdrawing ? "Перевод выполняется..." : "Инициировать выплату"}
                 </ActionButton>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Rules screen */}
+            {activeTab === "rules" && (
+              <div className="mx-auto max-w-2xl rounded-3xl border border-white/10 bg-slate-800/40 p-5 shadow-2xl backdrop-blur-md md:p-7 relative overflow-hidden animate-fade-in text-slate-200">
+                <div className="absolute top-0 inset-x-0 h-[1.5px] bg-gradient-to-r from-transparent via-indigo-500/50 to-transparent"></div>
+                
+                <div className="mb-6 flex items-center justify-between pb-4 border-b border-white/5">
+                  <div>
+                    <div className="text-[10px] font-bold uppercase tracking-widest text-[#818cf8] font-mono leading-none">Game Documentation</div>
+                    <h3 className="text-xl font-black text-white tracking-tight uppercase mt-2.5 flex items-center gap-2">
+                      <BookOpen size={18} className="text-indigo-400 animate-pulse" /> Правила игры: «Дилемма Доверия»
+                    </h3>
+                  </div>
+                </div>
+
+                <div className="space-y-6 text-xs md:text-sm font-medium leading-relaxed select-none">
+                  <p className="text-slate-350">
+                    Добро пожаловать в психологический поединок по теории игр (Крипто-Дилемма заключенного). Здесь корыстный расчет сталкивается со стратегическим доверием.
+                  </p>
+                  
+                  <div className="p-3 bg-indigo-500/10 rounded-2xl border border-indigo-500/20 text-indigo-300">
+                    <p className="font-bold mb-1 uppercase tracking-wider text-[10px]">Суть Игры:</p>
+                    Каждый раунд вы с оппонентом тайно выбираете одно из двух действий: <b>Сотрудничать</b> или <b>Предать</b>. Входной взнос за раунд составляет <b>{fmt(ENTRY_FEE)}</b>.
+                  </div>
+
+                  <div className="space-y-3">
+                    <p className="font-bold text-white uppercase tracking-wider text-[10px] text-slate-400">Сценарии расчета:</p>
+                    <ul className="space-y-1.5 list-disc list-inside text-xs">
+                      <li>
+                        🤝 <span className="text-emerald-400 font-bold">Оба Сотрудничают:</span> Синергия и доверие. Каждый игрок получает выплату по <span className="font-mono text-emerald-300 font-bold">{fmt(COOPERATION_PAYOUT)}</span> (чистая прибыль <span className="font-bold text-emerald-400">+{fmt(COOPERATION_PAYOUT - ENTRY_FEE)}</span>).
+                      </li>
+                      <li>
+                        🔪 <span className="text-purple-400 font-bold">Один Предает (Предательство):</span> Если ты выбрал предать, а соперник сотрудничать — ты забираешь выплату <span className="font-semibold text-emerald-300 font-bold">{fmt(SOLO_BETRAYAL_PAYOUT)}</span> (чистая прибыль <span className="font-bold text-emerald-400">+{fmt(SOLO_BETRAYAL_PAYOUT - ENTRY_FEE)}</span>), а соперник получает <span className="text-red-400 font-bold">{fmt(0)}</span> (чистый убыток <span className="text-red-450 text-[#f43f5e] font-bold">-{fmt(ENTRY_FEE)}</span>). При этом <span className="text-amber-300 font-semibold">{fmt(BONUS_POOL_CUT)}</span> взноса уходит в <b>Бонусный фонд</b>.
+                      </li>
+                      <li>
+                        ⚔️ <span className="text-red-450 text-[#f43f5e] font-semibold">Оба Предали:</span> Взаимное недоверие. Раунд аннулируется, игрокам выплачивается по <span className="font-mono text-slate-400 font-bold">{fmt(DOUBLE_BETRAYAL_PAYOUT)}</span> (возврат базового взноса, чистая прибыль <span className="font-bold text-slate-400">{fmt(0)}</span>).
+                      </li>
+                    </ul>
+                  </div>
+
+                  <div className="space-y-2">
+                    <p className="font-bold text-white uppercase tracking-wider text-[10px] text-slate-400">Дополнительные механики:</p>
+                    <div className="space-y-1 text-xs">
+                      <p>
+                        👁️ <b>Проверка досье:</b> За <span className="text-amber-400 font-bold">{fmt(REVEAL_FEE)}</span> перед ходом можно открыть аналитическую сводку по сопернику. Ты увидишь его стиль игры и точный процент прошлых предательств.
+                      </p>
+                      <p className="mt-1">
+                        🛡️ <b>Шифрование (Защитный щит):</b> За <span className="text-purple-400 font-bold">{fmt(HIDE_FEE)}</span> ты можешь полностью скрыть свои показатели от проверок на следующие <b>{HIDE_DURATION} раундов</b>. Соперник будет видеть твой статус как «Скрыто».
+                      </p>
+                      <p className="mt-1">
+                        🏆 <b>Еженедельный призовой пул:</b> Игроки, занявшие <b>Топ-3</b> места в Лиге доверия по итогам недели, разделяют накопительный бонусный фонд (<b>50%</b> первому месту, <b>30%</b> второму, <b>20%</b> третьему). Для участия нужно сыграть минимум <b>{MIN_GAMES_FOR_WEEKLY_BONUS} игр</b> без активного скрытия профиля.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-6 pt-5 border-t border-white/5 flex justify-center">
+                  <button
+                    onClick={() => { triggerHaptic('medium'); setActiveTab("play"); }}
+                    className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-550 text-white font-bold text-xs uppercase tracking-widest rounded-xl transition-all select-none cursor-pointer flex items-center gap-2 shadow-lg hover:shadow-indigo-500/20 active:scale-95 text-center"
+                  >
+                    Перейти к битве <Gamepad2 size={14} />
+                  </button>
+                </div>
               </div>
             )}
           </motion.div>
@@ -1437,102 +1528,28 @@ export default function App() {
               <span className={`text-[8px] tracking-wider font-extrabold uppercase mt-1 ${activeTab === "play" ? "text-indigo-400 font-black" : "text-slate-400"}`}>Дуэль</span>
             </button>
 
-            {/* Deposit Tab Button */}
+            {/* Finance Tab Button */}
             <button
-              onClick={() => { triggerHaptic('light'); setActiveTab("deposit"); }}
-              className={`flex flex-col items-center justify-center gap-1 transition-all flex-1 py-1 cursor-pointer ${activeTab === "deposit" ? "text-[#10b981] font-extrabold" : "text-slate-400 hover:text-slate-200"}`}
+              onClick={() => { triggerHaptic('light'); setActiveTab("finance"); }}
+              className={`flex flex-col items-center justify-center gap-1 transition-all flex-1 py-1 cursor-pointer ${activeTab === "finance" ? "text-emerald-400 font-extrabold" : "text-slate-400 hover:text-slate-200"}`}
             >
-              <ArrowDownLeft size={18} className={activeTab === "deposit" ? "scale-110 active:scale-95 transition-transform text-[#10b981]" : ""} />
-              <span className="text-[9px] tracking-tight uppercase">Пополнить</span>
+              <Wallet size={18} className={activeTab === "finance" ? "scale-110 active:scale-95 transition-transform text-[#10b981]" : ""} />
+              <span className="text-[9px] tracking-tight uppercase font-bold">Финансы</span>
             </button>
 
-            {/* Withdraw Tab Button */}
+            {/* Rules Tab Button */}
             <button
-              onClick={() => { triggerHaptic('light'); setActiveTab("withdraw"); }}
-              className={`flex flex-col items-center justify-center gap-1 transition-all flex-1 py-1 cursor-pointer ${activeTab === "withdraw" ? "text-[#f43f5e] font-extrabold" : "text-slate-400 hover:text-slate-200"}`}
+              onClick={() => { triggerHaptic('light'); setActiveTab("rules"); }}
+              className={`flex flex-col items-center justify-center gap-1 transition-all flex-1 py-1 cursor-pointer ${activeTab === "rules" ? "text-indigo-400 font-extrabold" : "text-slate-400 hover:text-slate-200"}`}
             >
-              <ArrowUpRight size={18} className={activeTab === "withdraw" ? "scale-110 active:scale-95 transition-transform text-[#f43f5e]" : ""} />
-              <span className="text-[9px] tracking-tight uppercase">Вывод</span>
+              <BookOpen size={18} className={activeTab === "rules" ? "scale-110 active:scale-95 transition-transform text-[#6366f1]" : ""} />
+              <span className="text-[9px] tracking-tight uppercase font-bold">Правила</span>
             </button>
 
           </div>
         </nav>
 
-        {/* Interactive Rules Modal */}
-        <AnimatePresence>
-          {showRules && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md"
-              onClick={() => setShowRules(false)}
-            >
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95, y: 15 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95, y: 15 }}
-                transition={{ duration: 0.18, ease: "easeOut" }}
-                className="relative w-full max-w-lg rounded-3xl border border-white/10 bg-slate-900 p-6 shadow-2xl overflow-hidden"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="absolute top-0 inset-x-0 h-[1.5px] bg-gradient-to-r from-transparent via-indigo-500/50 to-transparent"></div>
-                
-                <h3 className="text-xl font-black text-white tracking-tight flex items-center gap-2 mb-4">
-                  <BookOpen className="text-indigo-400 animate-pulse" size={20} /> Правила игры: «Дилемма Доверия»
-                </h3>
 
-                <div className="space-y-4 text-xs font-medium text-slate-300 leading-relaxed max-h-[60vh] overflow-y-auto pr-2 select-none scrollbar-thin">
-                  <p>
-                    Добро пожаловать в психологический поединок по теории игр (Крипто-Дилемма заключенного). Здесь корыстный расчет сталкивается со стратегическим доверием.
-                  </p>
-                  
-                  <div className="p-3 bg-indigo-500/10 rounded-2xl border border-indigo-500/20 text-indigo-300">
-                    <p className="font-bold mb-1 uppercase tracking-wider text-[10px]">Суть Игры:</p>
-                    Каждый раунд вы с оппонентом тайно выбираете одно из двух действий: <b>Сотрудничать</b> или <b>Предать</b>.
-                  </div>
-
-                  <div className="space-y-2">
-                    <p className="font-bold text-white uppercase tracking-wider text-[10px] text-slate-400">Сценарии расчета:</p>
-                    <ul className="space-y-1.5 list-disc list-inside">
-                      <li>
-                        🤝 <span className="text-emerald-400 font-bold">Оба Сотрудничают:</span> Синергия и доверие. Каждый игрок зарабатывает по <span className="font-mono text-emerald-300">+0.15 $</span>.
-                      </li>
-                      <li>
-                        🔪 <span className="text-purple-400 font-bold">Один Предает (Предательство):</span> Если ты выбрал предать, а соперник сотрудничать — ты забираешь всю кассу <span className="font-semibold text-emerald-300">+0.25 $</span>, а соперник получает <span className="text-red-400">0.00 $</span> (и наоборот). При этом <b>25%</b> взноса уходят в <b>Бонусный фонд</b>.
-                      </li>
-                      <li>
-                        ⚔️ <span className="text-red-400 font-semibold">Оба Предали:</span> Взаимное недоверие уничтожает прибыль. Раунд аннулируется, игрокам возвращается только базовый взнос по <span className="font-mono text-slate-400">0.05 $</span>.
-                      </li>
-                    </ul>
-                  </div>
-
-                  <div className="space-y-1">
-                    <p className="font-bold text-white uppercase tracking-wider text-[10px] text-slate-400">Дополнительные механики:</p>
-                    <p>
-                      👁️ <b>Проверка досье:</b> За <span className="text-amber-400 font-bold">0.05 $</span> перед ходом можно открыть аналитическую сводку по сопернику. Ты увидишь его стиль игры и точный процент прошлых предательств.
-                    </p>
-                    <p>
-                      🛡️ <b>Шифрование (Защитный щит):</b> За <span className="text-purple-400 font-bold">0.10 $</span> ты можешь полностью скрыть свои показатели от проверок на следующие 5 раундов. Соперник будет видеть твой статус как «Скрыто».
-                    </p>
-                    <p>
-                      🏆 <b>Еженедельный призовой пул:</b> Игроки, занявшие <b>Топ-3</b> места в Лиге доверия по итогам недели, разделяют накопительный бонусный фонд (60% первому, 30% второму, 10% третьему).
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-6">
-                  <button
-                    onClick={() => { triggerHaptic('light'); setShowRules(false); }}
-                    className="w-full py-3 text-xs font-bold uppercase tracking-widest rounded-xl bg-indigo-600 text-white hover:bg-indigo-550 transition-all select-none cursor-pointer text-center shadow-lg hover:shadow-indigo-550/20 active:scale-98"
-                  >
-                    Всё понятно
-                  </button>
-                </div>
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
 
         <footer className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/40 p-4 text-xs font-medium text-slate-500 leading-relaxed text-center pb-20">
           <b>Важно:</b> это демо без реальных платежей. В реальном продукте бонусный фонд должен считаться на сервере, а выплаты — закрываться после окончания сезона. Юридически такую механику надо отдельно проверять на признаки азартной игры.
