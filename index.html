@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Trust Duel</title>
+    <script>
+      (function() {
+        try {
+          var originalFetch = window.fetch;
+          Object.defineProperty(window, 'fetch', {
+            get: function() {
+              return originalFetch;
+            },
+            set: function(val) {
+              originalFetch = val;
+            },
+            configurable: true,
+            enumerable: true
+          });
+        } catch (e) {
+          console.warn("Failed to patch window.fetch getter/setter:", e);
+        }
+      })();
+    </script>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script type="module" crossorigin src="./assets/index-DzcAP6WL.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-D1INsxKj.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
+
