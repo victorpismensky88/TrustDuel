@@ -306,6 +306,7 @@ export default function App() {
 
   // Multi-user WebSocket & Matchmaker States
   const [socket, setSocket] = useState<Socket | null>(null);
+  const [isSocketConnected, setIsSocketConnected] = useState<boolean>(false);
   const [onlineCount, setOnlineCount] = useState<number>(1);
   const [queueCount, setQueueCount] = useState<number>(0);
   const [isSearching, setIsSearching] = useState<boolean>(false);
@@ -354,11 +355,28 @@ export default function App() {
 
   React.useEffect(() => {
     // Connect to the unified server at root (the port is handled transparently)
-    const s = io();
+    // Force direct websocket transport to prevent sticky-session/polling failures on Cloud Run
+    const s = io({
+      transports: ["websocket"],
+      upgrade: false,
+      reconnectionAttempts: 5,
+      timeout: 10000
+    });
     setSocket(s);
 
     s.on("connect", () => {
       console.log("WebSocket connected successfully:", s.id);
+      setIsSocketConnected(true);
+    });
+
+    s.on("connect_error", (error) => {
+      console.error("WebSocket connection error:", error);
+      setIsSocketConnected(false);
+    });
+
+    s.on("disconnect", (reason) => {
+      console.warn("WebSocket disconnected:", reason);
+      setIsSocketConnected(false);
     });
 
     s.on("server-stats", (data: { onlineCount: number; queueCount?: number; bonusPool: number }) => {
@@ -1022,7 +1040,28 @@ export default function App() {
                     </div>
 
                     <h2 className="text-2xl font-black text-white uppercase tracking-tight">Терминал Дуэлей Trust Duel</h2>
-                    <p className="mt-2 max-w-md mx-auto text-xs text-slate-400 leading-relaxed">
+                    
+                    {/* Visual Connection State Indicator */}
+                    <div className="mt-2 flex flex-col items-center justify-center gap-1.5 select-none">
+                      <div className="flex items-center justify-center">
+                        {isSocketConnected && socket ? (
+                          <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-500/10 border border-indigo-500/30 px-3 py-0.5 text-[10px] font-black font-mono tracking-widest text-indigo-300">
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                            СЕТЬ: АКТИВНА (ID: {socket.id?.substring(0, 6)})
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-500/10 border border-rose-500/30 px-3 py-0.5 text-[10px] font-black font-mono tracking-widest text-rose-400">
+                            <span className="h-1.5 w-1.5 rounded-full bg-rose-500 animate-ping"></span>
+                            ПОИСК СЕТЕВОГО УЗЛА...
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[9px] font-semibold text-slate-500 tracking-tight leading-none text-center">
+                        * Важно: Все ваши друзья должны использовать одну ссылку ({window.location.hostname.includes("ais-pre") ? "SHARE" : "DEV"}).
+                      </span>
+                    </div>
+
+                    <p className="mt-3.5 max-w-md mx-auto text-xs text-slate-400 leading-relaxed">
                       Случайные дуэли в защищенном пуле Лиги Доверия. Оппоненты подбираются из активных участников в реальном времени.
                     </p>
 
