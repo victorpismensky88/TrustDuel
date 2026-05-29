@@ -194,13 +194,35 @@ async function startServer() {
       broadcastServerStats();
     });
 
-    socket.on("force-bot-match", () => {
+    socket.on("force-bot-match", (clientDetails?: PlayerDetails) => {
       // Find player in queue
       const index = matchQueue.findIndex((q) => q.socket.id === socket.id);
       if (index !== -1) {
         const item = matchQueue[index];
         matchQueue.splice(index, 1);
         triggerBotMatch(socket, item.details);
+        broadcastServerStats();
+      } else if (clientDetails) {
+        // Fallback: player details passed from client
+        const playerDetails: PlayerDetails = {
+          ...clientDetails,
+          id: socket.id
+        };
+        triggerBotMatch(socket, playerDetails);
+        broadcastServerStats();
+      } else {
+        // Safe ultimate fallback: generate some default details
+        const playerDetails: PlayerDetails = {
+          id: socket.id,
+          name: `Игрок_${socket.id?.substring(0, 4) || "You"}`,
+          games: 0,
+          betrayals: 0,
+          avatar: "👤",
+          style: "осторожный",
+          profileHidden: false,
+          balance: 20
+        };
+        triggerBotMatch(socket, playerDetails);
         broadcastServerStats();
       }
     });

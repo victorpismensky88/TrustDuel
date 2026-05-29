@@ -551,7 +551,16 @@ export default function App() {
   const forceBotMatch = () => {
     if (!socket) return;
     triggerHaptic("medium");
-    socket.emit("force-bot-match");
+    const rate = playerGames ? Math.round((playerBetrayals / playerGames) * 100) : 0;
+    socket.emit("force-bot-match", {
+      name: tgUser ? (tgUser.username ? `@${tgUser.username}` : tgUser.first_name) : `Игрок_${socket.id?.substring(0, 4) || "You"}`,
+      games: playerGames,
+      betrayals: playerBetrayals,
+      avatar: tgUser ? "📱" : "👤",
+      style: rate > 60 ? "агрессивный" : rate < 20 ? "осторожный" : "хаотичный",
+      profileHidden: playerProfileHidden,
+      balance: balance
+    });
     setMessage("Запуск симулированного бота для тестирования...");
   };
 
