@@ -202,16 +202,27 @@ function StatCard({ icon: Icon, label, value, sub }: StatCardProps) {
   else if (label === "Твой ранг") valueColor = "text-purple-400 animate-pulse";
 
   return (
-    <div className="rounded-2xl border border-white/10 bg-slate-800/40 p-4 shadow-lg backdrop-blur-md hover:border-indigo-500/20 transition-all duration-300 group">
-      <div className="flex items-center gap-3">
-        <div className="rounded-xl bg-slate-950 p-2 text-slate-300 flex items-center justify-center border border-white/5 shadow-inner">
-          <Icon size={18} className="group-hover:text-indigo-400 transition-colors" />
+    <div className="rounded-2xl border border-white/10 bg-slate-800/40 p-3 shadow-lg backdrop-blur-md hover:border-indigo-500/20 transition-all duration-300 group flex flex-col justify-between min-w-0 overflow-hidden w-full h-full">
+      {/* Icon & Label row */}
+      <div className="flex items-center justify-between gap-1.5 mb-2">
+        <span className="text-[9px] xs:text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold truncate block" title={label}>
+          {label}
+        </span>
+        <div className="shrink-0 rounded-lg bg-slate-950 p-1.5 text-slate-400 flex items-center justify-center border border-white/5 shadow-inner">
+          <Icon size={12} className="group-hover:text-indigo-400 transition-colors" />
         </div>
-        <div>
-          <div className="text-[10px] uppercase tracking-widest text-[#94a3b8] font-bold">{label}</div>
-          <div className={`text-2xl font-black mt-0.5 font-mono leading-none tracking-tight ${valueColor}`}>{value}</div>
-          {sub ? <div className="text-[10px] text-slate-400 font-medium tracking-wide mt-1 uppercase">{sub}</div> : null}
+      </div>
+      
+      {/* Value row */}
+      <div className="min-w-0">
+        <div className={`text-sm xs:text-base sm:text-lg md:text-xl font-black font-mono leading-none tracking-tight truncate ${valueColor}`} title={String(value)}>
+          {value}
         </div>
+        {sub ? (
+          <div className="text-[8px] xs:text-[9px] text-slate-400 font-medium tracking-wide mt-1 uppercase truncate" title={sub}>
+            {sub}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -750,41 +761,21 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#0f172a] bg-[radial-gradient(ellipse_at_top,#1e1b4b,transparent_60%),linear-gradient(185deg,#0f172a,#020617)] text-slate-100 p-4 md:p-8 font-sans selection:bg-indigo-500/30 selection:text-white">
       <div className="mx-auto max-w-7xl">
-        <header className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between rounded-2xl bg-slate-800/50 border border-white/10 p-5 backdrop-blur shadow-xl">
+        <header className="mb-6 flex items-center rounded-2xl bg-slate-800/50 border border-white/10 p-5 backdrop-blur shadow-xl">
           <div className="flex items-center gap-4">
             <div className="w-11 h-11 bg-indigo-600 rounded-xl flex items-center justify-center font-black text-xl text-white shadow-lg border border-indigo-400/30 select-none">
               TD
             </div>
             <div>
-              <div className="mb-1 flex items-center gap-1.5 flex-wrap">
+              <div className="mb-1">
                 <span className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/40 px-2.5 py-0.5 text-[9px] font-black uppercase tracking-widest text-[#94a3b8] shadow-sm select-none">
                   <Flame size={12} className="text-amber-400" /> Prisoner's Dilemma
                 </span>
-                {isTelegram && (
-                  <span className="inline-flex items-center gap-1 rounded-full border border-sky-500/30 bg-sky-550/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-sky-400 shadow-sm animate-pulse select-none">
-                    Telegram Active
-                  </span>
-                )}
               </div>
               <h1 className="text-2xl font-black tracking-tighter uppercase text-white md:text-3xl leading-none">
                 Trust Duel <span className="text-indigo-400 font-extrabold text-[#6366f1] text-base font-mono tracking-tight ml-1">v2.0</span>
               </h1>
             </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3 mt-2 md:mt-0">
-            <button
-              onClick={() => { triggerHaptic('light'); setShowTipPopup(true); }}
-              className="px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-lg border border-indigo-500/25 bg-indigo-550/10 text-indigo-400 hover:bg-indigo-600/20 hover:text-white transition-all select-none cursor-pointer flex items-center gap-2 shadow-md"
-            >
-              <Lightbulb size={13} className="text-amber-400 animate-pulse" /> Совет дня
-            </button>
-            <button
-              onClick={resetGame}
-              className="px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-lg border border-slate-700 bg-slate-900/60 text-slate-300 hover:bg-slate-800 hover:text-white transition-all select-none cursor-pointer flex items-center gap-2 shadow-sm"
-            >
-              <RefreshCw size={12} /> Сбросить демо
-            </button>
           </div>
         </header>
 
@@ -1067,10 +1058,10 @@ export default function App() {
                         </div>
                         <div className="grid grid-cols-3 gap-2">
                           {WEEKLY_BONUS_SHARES.map((share, index) => (
-                            <div key={share} className="rounded-xl bg-slate-950 p-2 text-center border border-slate-800 shadow-inner">
-                              <div className="text-[9px] font-bold text-slate-500">#{index + 1} призовое</div>
-                              <div className="text-xs font-black text-amber-400 stat-value font-mono mt-0.5">{fmt(bonusPool * share)}</div>
-                              <div className="text-[8px] font-bold text-slate-500 mt-0.5">{Math.round(share * 100)}% пула</div>
+                            <div key={share} className="rounded-xl bg-slate-950 p-2 text-center border border-slate-800 shadow-inner min-w-0 overflow-hidden">
+                              <div className="text-[9px] font-bold text-slate-500 truncate">#{index + 1} призовое</div>
+                              <div className="text-[10px] xs:text-xs font-black text-amber-400 stat-value font-mono mt-0.5 truncate" title={fmt(bonusPool * share)}>{fmt(bonusPool * share)}</div>
+                              <div className="text-[8px] font-bold text-slate-500 mt-0.5 truncate">{Math.round(share * 100)}% пула</div>
                             </div>
                           ))}
                         </div>
@@ -1726,6 +1717,29 @@ export default function App() {
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* Floating "Совет дня" Action Button */}
+        <div className="fixed bottom-24 right-4 md:right-8 z-40 flex flex-col items-end gap-2 select-none">
+          <button
+            onClick={() => {
+              triggerHaptic('light');
+              setShowTipPopup(true);
+            }}
+            className="p-3.5 rounded-full bg-slate-900/95 border border-amber-500/30 text-amber-400 hover:text-amber-300 shadow-[0_4px_20px_rgba(245,158,11,0.35)] hover:shadow-[0_4px_25px_rgba(245,158,11,0.55)] active:scale-95 transition-all cursor-pointer relative group flex items-center justify-center backdrop-blur-md"
+            title="Совет дня"
+          >
+            {/* Outer pulsating wave ring */}
+            <span className="absolute inset-0 rounded-full bg-amber-500/10 animate-ping opacity-60"></span>
+            
+            {/* Inner pulsing bulb */}
+            <Lightbulb size={22} className="relative z-10 animate-pulse text-amber-400" />
+            
+            {/* Hint tag revealed on hover */}
+            <span className="absolute right-full mr-3 px-2.5 py-1 text-[10px] font-bold text-amber-400 bg-slate-900/95 border border-amber-500/20 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-xl">
+              Совет дня
+            </span>
+          </button>
+        </div>
 
         {/* Interactive Tip Of The Day Modal Popup */}
         <AnimatePresence>
