@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
+import { io, Socket } from "socket.io-client";
 import {
   ShieldCheck,
   Skull,
@@ -25,6 +26,10 @@ import {
   BookOpen,
   HelpCircle,
   Lightbulb,
+  Search,
+  Compass,
+  Crosshair,
+  Radio,
 } from "lucide-react";
 
 interface Opponent {
@@ -298,6 +303,212 @@ export default function App() {
   const [withdrawStep, setWithdrawStep] = useState<number>(0);
   const [withdrawLogs, setWithdrawLogs] = useState<string[]>([]);
   const [withdrawStatus, setWithdrawStatus] = useState<string>("");
+
+  // Multi-user WebSocket & Matchmaker States
+  const [socket, setSocket] = useState<Socket | null>(null);
+  const [onlineCount, setOnlineCount] = useState<number>(1);
+  const [isSearching, setIsSearching] = useState<boolean>(false);
+  const [searchDuration, setSearchDuration] = useState<number>(0);
+  const [activeMatch, setActiveMatch] = useState<{
+    roomId: string;
+    opponent: {
+      id: string;
+      name: string;
+      games: number;
+      betrayals: number;
+      avatar: string;
+      style: string;
+      profileHidden: boolean;
+      balance: number;
+    };
+    yourRole: string;
+  } | null>(null);
+  const [isWaitingForOpponent, setIsWaitingForOpponent] = useState<boolean>(false);
+  const [opponentSubmitted, setOpponentSubmitted] = useState<boolean>(false);
+  const [matchResultState, setMatchResultState] = useState<{
+    playerAction: "cooperate" | "betray";
+    opponentAction: "cooperate" | "betray";
+    payout: number;
+    opponentPayout: number;
+    title: string;
+    text: string;
+    economy: string;
+    net: number;
+  } | null>(null);
+
+  React.useEffect(() => {
+    // Connect to the unified server at root (the port is handled transparently)
+    const s = io();
+    setSocket(s);
+
+    s.on("connect", () => {
+      console.log("WebSocket connected successfully:", s.id);
+    });
+
+    s.on("server-stats", (data: { onlineCount: number; bonusPool: number }) => {
+      if (data.onlineCount) setOnlineCount(data.onlineCount);
+      if (data.bonusPool) setBonusPool(data.bonusPool);
+    });
+
+    s.on("match-found", (data: any) => {
+      triggerHaptic("success");
+      setIsSearching(false);
+      setActiveMatch(data);
+      setOpponentSubmitted(false);
+      setIsWaitingForOpponent(false);
+      setMatchResultState(null);
+      setMessage(`Соперник ${data.opponent.name} успешно обнаружен. Начинаем защищенный Trust Duel!`);
+    });
+
+    s.on("opponent-submitted", () => {
+      triggerHaptic("light");
+      setOpponentSubmitted(true);
+    });
+
+    s.on("waiting-for-opponent", () => {
+      setIsWaitingForOpponent(true);
+    });
+
+    s.on("match-result", (data: any) => {
+      triggerHaptic("medium");
+      setIsWaitingForOpponent(false);
+      setMatchResultState(data);
+      if (data.bonusPool) setBonusPool(data.bonusPool);
+      
+      // Update local bankroll and stats cleanly
+      setBalance((v) => Number((v - ENTRY_FEE + data.payout).toFixed(2)));
+      setPlayerGames((v) => v + 1);
+      if (data.playerAction === "betray") {
+        setPlayerBetrayals((v) => v + 1);
+      }
+
+      // Add a record to history
+      const row: HistoryRow = {
+        id: Date.now(),
+        // Check if opponent action is betray
+        opponent: data.opponentAction === "betray" ? `[Duel] ${activeMatch?.opponent.name || "Соперник"} (ПРЕДАТЕЛЬ)` : `[Duel] ${activeMatch?.opponent.name || "Соперник"} (ДОВЕРИЕ)`,
+        avatar: activeMatch?.opponent.avatar || "👤",
+        playerAction: data.playerAction,
+        opponentAction: data.opponentAction,
+        payout: data.payout,
+        net: data.net,
+        title: data.title,
+        balance: Number((balance - ENTRY_FEE + data.payout).toFixed(2)),
+        economy: data.economy,
+        profileHiddenDuringRound: playerProfileHidden,
+      };
+
+      setHistory((prev) => [row, ...prev].slice(0, 10));
+      setMessage(`Дуэль завершена: ${data.title}. ${data.text}`);
+    });
+
+    s.on("opponent-disconnected", (data: { message: string }) => {
+      triggerHaptic("warning");
+      setMessage(data.message);
+      setIsWaitingForOpponent(false);
+      setOpponentSubmitted(false);
+      setActiveMatch(null);
+      setIsSearching(false);
+    });
+
+    return () => {
+      s.disconnect();
+    };
+  }, [activeMatch, playerProfileHidden, balance]);
+
+  React.useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (isSearching) {
+      setSearchDuration(0);
+      interval = setInterval(() => {
+        setSearchDuration((d) => d + 1);
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [isSearching]);
+
+  const startMatchmaking = () => {
+    if (!socket) return;
+    if (balance < ENTRY_FEE) {
+      triggerHaptic("error");
+      setMessage("Недостаточно средств на балансе для внесения залога.");
+      return;
+    }
+    triggerHaptic("medium");
+    setIsSearching(true);
+    setMatchResultState(null);
+    setOpponentSubmitted(false);
+    setIsWaitingForOpponent(false);
+    
+    const rate = playerGames ? Math.round((playerBetrayals / playerGames) * 100) : 0;
+    
+    // Register details in matchmaking queue
+    socket.emit("join-queue", {
+      name: tgUser ? (tgUser.username ? `@${tgUser.username}` : tgUser.first_name) : `Игрок_${socket.id?.substring(0, 4) || "You"}`,
+      games: playerGames,
+      betrayals: playerBetrayals,
+      avatar: tgUser ? "📱" : "👤",
+      style: rate > 60 ? "агрессивный" : rate < 20 ? "осторожный" : "хаотичный",
+      profileHidden: playerProfileHidden,
+      balance: balance
+    });
+    setMessage("Поиск оппонента в защищенном пуле Лиги Доверия...");
+  };
+
+  const cancelMatchmaking = () => {
+    if (!socket) return;
+    triggerHaptic("light");
+    socket.emit("leave-queue");
+    setIsSearching(false);
+    setMessage("Поиск оппонента отменен.");
+  };
+
+  const submitMatchAction = (action: "cooperate" | "betray") => {
+    if (!socket || !activeMatch) return;
+    triggerHaptic("medium");
+    socket.emit("submit-action", {
+      roomId: activeMatch.roomId,
+      action
+    });
+    setMessage("Твой выбор зафиксирован. Ожидаем решения оппонента...");
+  };
+
+  const completeMatch = () => {
+    triggerHaptic("light");
+    setActiveMatch(null);
+    setMatchResultState(null);
+    setOpponentSubmitted(false);
+    setIsWaitingForOpponent(false);
+    setMessage("Вы вернулись в лобби дуэлей. Готовы к следующему поиску?");
+  };
+
+  const searchAnotherOpponent = () => {
+    if (!socket) return;
+    triggerHaptic("medium");
+    if (activeMatch) {
+      socket.emit("leave-room", { roomId: activeMatch.roomId });
+    }
+    setActiveMatch(null);
+    setMatchResultState(null);
+    setOpponentSubmitted(false);
+    setIsWaitingForOpponent(false);
+    
+    // Now trigger matchmaking immediately
+    setIsSearching(true);
+    setSearchDuration(0);
+    const rate = playerGames ? Math.round((playerBetrayals / playerGames) * 100) : 0;
+    
+    socket.emit("join-queue", {
+      name: tgUser ? (tgUser.username ? `@${tgUser.username}` : tgUser.first_name) : `Игрок_${socket.id?.substring(0, 4) || "You"}`,
+      games: playerGames,
+      betrayals: playerBetrayals,
+      avatar: tgUser ? "📱" : "👤",
+      style: rate > 60 ? "агрессивный" : rate < 20 ? "осторожный" : "хаотичный",
+      profileHidden: playerProfileHidden,
+      balance: balance
+    });
+    setMessage("Поиск нового оппонента в защищенном пуле Лиги Доверия...");
+  };
 
   // Динамические советы дня во вкладку "Правила"
   const tipOfDay = useMemo(() => {
@@ -781,12 +992,12 @@ export default function App() {
 
         {/* Global Statistics Grid */}
         {activeTab === "account" && (
-          <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
+          <div className="mb-6 grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-3 md:grid-cols-5 gap-2.5">
             <StatCard icon={Coins} label="Баланс" value={fmt(balance)} sub="демо-счёт" />
             <StatCard icon={Users} label="Твои игры" value={playerGames} sub="сыгранные раунды" />
             <StatCard icon={Skull} label="Предательства" value={`${playerRate}%`} sub={`${playerBetrayals} из ${playerGames || 0}`} />
-            <StatCard icon={Gift} label="Бонусный фонд" value={fmt(bonusPool)} sub={`из ${DEMO_SEEDED_GAMES.toLocaleString("ru-RU")} демо-игр`} />
-            <StatCard icon={Trophy} label="Твой ранг" value={`#${playerWeeklyRank}`} sub="в Лиге доверия" />
+            <StatCard icon={Gift} label="Бонусный фонд" value={fmt(bonusPool)} sub="Бонус-фонд" />
+            <StatCard icon={Trophy} label="Твой ранг" value={`#${playerWeeklyRank}`} sub="Лига доверия" />
           </div>
         )}
 
@@ -802,188 +1013,380 @@ export default function App() {
           >
             {activeTab === "play" && (
               <div className="mx-auto max-w-3xl space-y-6 animate-fade-in">
-                <section className="rounded-3xl border border-white/10 bg-slate-800/40 p-5 shadow-2xl backdrop-blur-md md:p-7 relative overflow-hidden">
-                  <div className="absolute top-0 inset-x-0 h-[1.5px] bg-gradient-to-r from-transparent via-indigo-500/50 to-transparent"></div>
-                  
-                  <div className="mb-6 flex flex-col gap-5 md:flex-row md:items-center md:justify-between p-4 rounded-2xl bg-slate-900/50 border border-white/5">
-                    <div className="flex items-center gap-4">
-                      <div className="relative shrink-0 select-none">
-                        <div className="flex h-24 w-24 items-center justify-center rounded-3xl bg-slate-950 text-5xl shadow-2xl border border-slate-700">
-                          {currentOpponent.avatar}
-                        </div>
-                        <div className={`absolute -bottom-1 -right-1 px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider shadow-md ${
-                          opponentRate > 60 ? "bg-red-600 text-white" : opponentRate < 20 ? "bg-emerald-600 text-white" : "bg-indigo-600 text-white"
-                        }`}>
-                          {opponentRate > 60 ? "Danger" : opponentRate < 20 ? "Safe" : "Neutral"}
-                        </div>
+                {/* LOBBY / PRE-MATCH SEARCH STATE */}
+                {!isSearching && !activeMatch && (
+                  <section className="rounded-3xl border border-white/10 bg-slate-800/40 p-5 shadow-2xl backdrop-blur-md md:p-8 relative overflow-hidden text-center">
+                    <div className="absolute top-0 inset-x-0 h-[1.5px] bg-gradient-to-r from-transparent via-indigo-500/50 to-transparent"></div>
+                    
+                    <div className="mx-auto w-16 h-16 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400 mb-4 animate-bounce">
+                      <Gamepad2 size={32} />
+                    </div>
+
+                    <h2 className="text-2xl font-black text-white uppercase tracking-tight">Терминал Дуэлей Trust Duel</h2>
+                    <p className="mt-2 max-w-md mx-auto text-xs text-slate-400 leading-relaxed">
+                      Случайные дуэли в защищенном пуле Лиги Доверия. Оппоненты подбираются из активных участников в реальном времени.
+                    </p>
+
+                    {/* Stats Dashboard inside Lobby */}
+                    <div className="grid grid-cols-2 gap-3 max-w-lg mx-auto my-6">
+                      <div className="rounded-2xl border border-slate-700/50 bg-slate-900/50 p-4">
+                        <div className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Игроков онлайн</div>
+                        <div className="text-xl font-black text-indigo-400 font-mono mt-0.5">{onlineCount}</div>
                       </div>
-                      <div>
-                        <div className="text-[10px] font-bold uppercase tracking-widest text-[#94a3b8]">Текущий соперник</div>
-                        <h2 className="text-3xl font-black text-white tracking-tight leading-none mt-1">{currentOpponent.name}</h2>
-                        <div className="flex items-center gap-2 mt-2">
-                          <span className="px-2.5 py-0.5 bg-slate-800 rounded-lg text-[10px] font-bold text-slate-400 uppercase tracking-widest border border-slate-700/55">
-                            Стиль: {currentOpponent.style}
+                      <div className="rounded-2xl border border-slate-700/50 bg-slate-900/50 p-4">
+                        <div className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Входной залог</div>
+                        <div className="text-xl font-black text-emerald-400 font-mono mt-0.5">{fmt(ENTRY_FEE)}</div>
+                      </div>
+                    </div>
+
+                    {/* Launch Round/Matchmaker Button */}
+                    <div className="max-w-sm mx-auto">
+                      <button
+                        onClick={startMatchmaking}
+                        disabled={balance < ENTRY_FEE}
+                        className="w-full relative flex items-center justify-center gap-3 rounded-2xl bg-gradient-to-tr from-indigo-600 to-indigo-500 text-white font-extrabold uppercase tracking-widest text-xs px-6 py-4 border border-indigo-400 shadow-[0_0_20px_rgba(99,102,241,0.3)] hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer disabled:opacity-40 disabled:pointer-events-none group select-none"
+                      >
+                        <Search size={16} className="group-hover:rotate-12 transition-transform" />
+                        Искать Оппонента
+                        <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+                        </span>
+                      </button>
+                    </div>
+
+                    <p className="mt-3 text-[10px] text-slate-500 font-medium">
+                      * Если в течение 4 секунд реальный оппонент не будет найден, сервер подключит симулирующего бота для прохождения теста.
+                    </p>
+                  </section>
+                )}
+
+                {/* SEARCHING RADAR SCANNER STATE */}
+                {isSearching && (
+                  <section className="rounded-3xl border border-indigo-500/30 bg-slate-950/80 p-6 md:p-8 shadow-2xl backdrop-blur-md relative overflow-hidden flex flex-col items-center justify-center text-center">
+                    {/* Glowing radar screen background */}
+                    <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(99,102,241,0.06),transparent_60%)]"></div>
+
+                    {/* Radar Screen Layout */}
+                    <div className="relative w-48 h-48 rounded-full border border-indigo-500/20 bg-slate-950 flex items-center justify-center mb-6">
+                      {/* Rotating radial beam line */}
+                      <div className="absolute inset-1 rounded-full border border-indigo-500/10"></div>
+                      <div className="absolute inset-6 rounded-full border border-indigo-500/10"></div>
+                      <div className="absolute inset-12 rounded-full border border-indigo-500/5"></div>
+                      
+                      {/* Rotating Sweep beam */}
+                      <div className="absolute top-1/2 left-1/2 w-24 h-[1.5px] bg-gradient-to-r from-indigo-500 to-transparent origin-left -translate-y-1/2 animate-[spin_3s_linear_infinite]" style={{ transformOrigin: "0% 50%" }}></div>
+
+                      {/* Blinking Targets */}
+                      <div className="absolute top-12 left-16 w-1.5 h-1.5 bg-emerald-400 rounded-full animate-ping"></div>
+                      <div className="absolute bottom-16 right-12 w-1.5 h-1.5 bg-indigo-400 rounded-full animate-pulse"></div>
+
+                      <div className="z-10 text-indigo-400">
+                        <Crosshair size={32} className="animate-pulse" />
+                      </div>
+                    </div>
+
+                    <div className="z-10">
+                      <div className="text-xs font-black uppercase text-indigo-400 tracking-widest animate-pulse flex items-center justify-center gap-2">
+                        <Radio size={12} className="animate-pulse" /> Сканирование сети Лиги...
+                      </div>
+                      <div className="text-2xl font-black font-mono text-white mt-1">
+                        00:{searchDuration < 10 ? `0${searchDuration}` : searchDuration}
+                      </div>
+                      <p className="mt-2 text-xs text-slate-400 max-w-xs mx-auto">
+                        Защищенный сокет подключен. Ищем свободного оппонента в Лиге доверия...
+                      </p>
+                    </div>
+
+                    <div className="mt-6 w-full max-w-xs z-10">
+                      <button
+                        onClick={cancelMatchmaking}
+                        className="w-full rounded-xl border border-slate-700 bg-slate-900/60 text-slate-300 hover:bg-slate-800 hover:text-white transition-all py-2.5 text-xs font-bold uppercase tracking-wider select-none cursor-pointer"
+                      >
+                        Отменить Поиск
+                      </button>
+                    </div>
+                  </section>
+                )}
+
+                {/* ACTIVE LIVE GAME PLAYING STATE */}
+                {activeMatch && (
+                  <section className="rounded-3xl border border-white/10 bg-slate-800/40 p-5 shadow-2xl backdrop-blur-md md:p-7 relative overflow-hidden">
+                    <div className="absolute top-0 inset-x-0 h-[1.5px] bg-gradient-to-r from-transparent via-indigo-500/50 to-transparent"></div>
+                    
+                    {/* Header: Duel Info Details */}
+                    <div className="mb-6 rounded-2xl bg-slate-900/50 border border-white/5 p-4 flex flex-col md:flex-row items-center justify-between gap-4">
+                      {/* Left: You */}
+                      <div className="flex items-center gap-3 w-full md:w-auto">
+                        <div className="h-12 w-12 rounded-xl bg-indigo-600 flex items-center justify-center text-2xl border border-indigo-400/30 shrink-0">
+                          🧑‍🚀
+                        </div>
+                        <div className="text-left">
+                          <span className="text-[8px] uppercase tracking-wider text-slate-400 font-bold block">Ты (Игрок)</span>
+                          <span className="font-extrabold text-sm text-white block truncate max-w-[120px]">
+                            {tgUser ? (tgUser.username ? `@${tgUser.username}` : tgUser.first_name) : `Игрок_${socket?.id?.substring(0, 4)}`}
                           </span>
-                          {currentOpponent.profileHidden && (
-                            <span className="px-2.5 py-0.5 bg-purple-500/10 text-purple-400 rounded-lg text-[10px] font-bold uppercase tracking-widest border border-purple-500/20">
-                              Скрытый профиль
-                            </span>
-                          )}
+                        </div>
+                      </div>
+
+                      {/* Middle VS Badge Divider */}
+                      <div className="flex flex-col items-center justify-center shrink-0">
+                        <span className="text-xs font-black tracking-widest text-[#6366f1] bg-indigo-500/10 border border-indigo-500/20 px-3 py-1 rounded-full animate-pulse uppercase">
+                          HOLOGRAPHIC VS
+                        </span>
+                        <span className="text-[8px] text-slate-500 uppercase tracking-widest mt-1">Серверный Дуэль</span>
+                      </div>
+
+                      {/* Right: Opponent */}
+                      <div className="flex items-center gap-3 w-full md:w-auto md:flex-row-reverse text-right">
+                        <div className="h-12 w-12 rounded-xl bg-slate-950 flex items-center justify-center text-2xl border border-slate-700 shrink-0">
+                          {activeMatch.opponent.avatar}
+                        </div>
+                        <div className="text-left md:text-right">
+                          <span className="text-[8px] uppercase tracking-wider text-slate-400 font-bold block">Оппонент</span>
+                          <span className="font-extrabold text-sm text-white block truncate max-w-[120px]" title={activeMatch.opponent.name}>
+                            {activeMatch.opponent.name}
+                          </span>
                         </div>
                       </div>
                     </div>
 
-                    <div className="rounded-2xl border border-slate-700/60 bg-slate-950/50 px-5 py-3 md:text-right shrink-0">
-                      <div className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Входной билет</div>
-                      <div className="text-2xl font-black text-emerald-400 font-mono mt-0.5">{fmt(ENTRY_FEE)}</div>
-                    </div>
-                  </div>
+                    {/* Option to search for another player (visible immediately at the top) */}
+                    {!matchResultState && (
+                      <div className="mb-5">
+                        <button
+                          onClick={searchAnotherOpponent}
+                          className="w-full flex items-center justify-center gap-2 rounded-2xl border border-dashed border-[#6366f1]/30 hover:border-indigo-400 bg-slate-900/40 text-indigo-300 hover:text-white transition-all py-3.5 text-xs font-black uppercase tracking-widest select-none cursor-pointer"
+                        >
+                          <RefreshCw size={13} className="animate-spin-slow text-indigo-400" />
+                          Поиск другого игрока
+                        </button>
+                      </div>
+                    )}
 
-                  <AnimatePresence mode="wait">
-                    <motion.div
-                      key={`${currentOpponent.id}-${isRevealed}`}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -10 }}
-                      transition={{ duration: 0.15 }}
-                      className="mb-5 rounded-3xl border border-white/5 bg-slate-950/40 p-5 backdrop-blur shadow-inner"
-                    >
-                      {!isRevealed ? (
-                        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                          <div className="flex items-start gap-4">
-                            <div className="rounded-2xl bg-slate-900 border border-slate-700/50 p-3 text-slate-300 flex items-center justify-center shrink-0">
-                              <Lock size={22} className="text-amber-400 animate-pulse" />
+                    {/* Dossier status of the opponent */}
+                    <AnimatePresence mode="wait">
+                      <motion.div
+                        key={String(revealedIds.has(activeMatch.opponent.id as any))}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -10 }}
+                        transition={{ duration: 0.15 }}
+                        className="mb-5 rounded-3xl border border-white/5 bg-slate-950/40 p-5 backdrop-blur shadow-inner"
+                      >
+                        {!revealedIds.has(activeMatch.opponent.id as any) ? (
+                          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                            <div className="flex items-start gap-4">
+                              <div className="rounded-2xl bg-slate-900 border border-slate-700/50 p-3 text-slate-300 flex items-center justify-center shrink-0">
+                                <Lock size={22} className="text-amber-400 animate-pulse" />
+                              </div>
+                              <div className="text-left">
+                                <h3 className="text-sm font-extrabold text-slate-100 uppercase tracking-tight">Досье заблокировано</h3>
+                                <p className="mt-1 max-w-xl text-xs text-slate-400 leading-relaxed">
+                                  Для разблокировки истории предательств и уязвимостей оппонента запросите выписку. Для заблокированных профилей виден факт скрытия.
+                                </p>
+                              </div>
                             </div>
-                            <div>
-                              <h3 className="text-lg font-extrabold text-slate-100 uppercase tracking-tight">Досье не открыто</h3>
-                              <p className="mt-1 max-w-xl text-xs text-slate-400 leading-relaxed">
-                                Можно играть вслепую или открыть статистику соперника. Если игрок заранее скрыл досье за {fmt(HIDE_FEE)}, ты увидишь только факт скрытия.
-                              </p>
+                            <div className="w-full md:w-56 shrink-0 md:pl-2">
+                              <ActionButton
+                                onClick={() => {
+                                  if (balance >= REVEAL_FEE) {
+                                    triggerHaptic("light");
+                                    setBalance((v) => Number((v - REVEAL_FEE).toFixed(2)));
+                                    setRevealedIds((prev) => {
+                                      const next = new Set(prev);
+                                      next.add(activeMatch.opponent.id as any);
+                                      return next;
+                                    });
+                                    setMessage(`Досье открыто: ${activeMatch.opponent.name} имеет стиль: ${activeMatch.opponent.style}.`);
+                                  } else {
+                                    triggerHaptic("error");
+                                    setMessage("Недостаточно средств для раскрытия досье.");
+                                  }
+                                }}
+                                disabled={balance < REVEAL_FEE}
+                                variant="amber"
+                                icon={Eye}
+                              >
+                                Раскрыть за {fmt(REVEAL_FEE)}
+                              </ActionButton>
                             </div>
                           </div>
-                          <div className="w-full md:w-56 shrink-0 md:pl-2">
-                            <ActionButton onClick={revealProfile} disabled={!canReveal} variant="amber" icon={Eye}>
-                              Проверить за {fmt(REVEAL_FEE)}
+                        ) : activeMatch.opponent.profileHidden ? (
+                          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between text-left">
+                            <div className="flex items-start gap-4">
+                              <div className="rounded-2xl bg-purple-950/40 border border-purple-800/30 p-3 text-white flex items-center justify-center shrink-0">
+                                <UserX size={22} className="text-purple-400" />
+                              </div>
+                              <div className="text-left">
+                                <h3 className="text-sm font-extrabold text-slate-100 uppercase tracking-tight text-purple-200">Досье скрыто оппонентом</h3>
+                                <p className="mt-1 max-w-xl text-xs text-slate-400 leading-relaxed">
+                                  Оппонент активировал режим шифрования профиля. Точный процент предательств не может быть извлечен, но сам залог конфиденциальности является сигналом тактического прагматизма.
+                                </p>
+                              </div>
+                            </div>
+                            <div className="rounded-xl border border-purple-500/20 bg-purple-500/10 px-4 py-2 text-xs font-black text-purple-400 uppercase tracking-wider text-center shrink-0">
+                              неизвестно
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 text-left">
+                            <div className="rounded-2xl bg-slate-900/50 p-4 shadow-sm border border-slate-800 flex flex-col justify-between">
+                              <div>
+                                <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Процент предательств</span>
+                                <div className="mt-1.5 text-3xl font-black font-mono text-red-400 leading-none">
+                                  {activeMatch.opponent.games ? Math.round((activeMatch.opponent.betrayals / activeMatch.opponent.games) * 100) : 40}%
+                                </div>
+                              </div>
+                              <div className="mt-2 text-xs text-slate-500 font-medium">
+                                {activeMatch.opponent.betrayals} предательств из {activeMatch.opponent.games} игр
+                              </div>
+                            </div>
+                            <div className="rounded-2xl bg-slate-900/50 p-4 shadow-sm border border-slate-800 flex flex-col justify-between">
+                              <div>
+                                <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Уровень риска</span>
+                                <div className="mt-1.5">
+                                  {(() => {
+                                    const rate = activeMatch.opponent.games ? Math.round((activeMatch.opponent.betrayals / activeMatch.opponent.games) * 100) : 40;
+                                    const r = riskLabel(rate);
+                                    return (
+                                      <span className={`inline-flex rounded-full border px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider ${r.tone}`}>
+                                        {r.title}
+                                      </span>
+                                    );
+                                  })()}
+                                </div>
+                              </div>
+                              <div className="mt-2 text-xs text-slate-400 font-medium">
+                                {activeMatch.opponent.style || "хаотичный"} стиль игры
+                              </div>
+                            </div>
+                            <div className="rounded-2xl bg-slate-900/50 p-4 shadow-sm border border-slate-800 flex flex-col justify-between">
+                              <div>
+                                <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Характер</span>
+                                <div className="mt-1.5 text-xs font-semibold text-slate-300 leading-snug">
+                                  Рекомендуем играть осторожно, адаптируясь под выявленный класс поведения игрока.
+                                </div>
+                              </div>
+                              <div className="text-[9px] text-[#6366f1] uppercase font-black tracking-widest mt-2">Анализ завершен</div>
+                            </div>
+                          </div>
+                        )}
+                      </motion.div>
+                    </AnimatePresence>
+
+                    {/* Game payout guidelines (Таблица выплат) */}
+                    <div className="mb-5 rounded-3xl border border-slate-800 bg-slate-900/40 p-4">
+                      <div className="mb-3 flex items-center justify-between text-xs font-bold uppercase tracking-wider text-[#94a3b8]">
+                        <div className="flex items-center gap-2">
+                          <AlertTriangle size={14} className="text-amber-500" /> Спецификация залога
+                        </div>
+                        <div className="font-mono text-[10px] text-indigo-400">Вход: {fmt(ENTRY_FEE)}</div>
+                      </div>
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 text-left">
+                        <div className="rounded-2xl bg-emerald-950/20 p-4 border border-emerald-500/20">
+                          <div className="font-extrabold text-emerald-400 uppercase text-xs tracking-wider">Оба сотрудничают</div>
+                          <div className="text-xs text-emerald-300 mt-1">Оба получают {fmt(COOPERATION_PAYOUT)}</div>
+                        </div>
+                        <div className="rounded-2xl bg-purple-950/20 p-4 border border-purple-500/20">
+                          <div className="font-extrabold text-purple-400 uppercase text-xs tracking-wider">Один предает</div>
+                          <div className="text-xs text-purple-300 mt-1">Предатель заберет {fmt(SOLO_BETRAYAL_PAYOUT)}</div>
+                        </div>
+                        <div className="rounded-2xl bg-slate-900/60 p-4 border border-slate-700/50">
+                          <div className="font-extrabold text-slate-300 uppercase text-xs tracking-wider">Оба предали</div>
+                          <div className="text-xs text-slate-400 mt-1">Оба вернут залоги в сумме {fmt(DOUBLE_BETRAYAL_PAYOUT)}</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Match Action Selection Block */}
+                    {!matchResultState && (
+                      <div className="space-y-4">
+                        {!isWaitingForOpponent ? (
+                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                            <ActionButton onClick={() => submitMatchAction("cooperate")} variant="green" icon={ShieldCheck}>
+                              Сотрудничать 🤝
+                            </ActionButton>
+                            <ActionButton onClick={() => submitMatchAction("betray")} variant="red" icon={Skull}>
+                              Предать 💀
                             </ActionButton>
                           </div>
-                        </div>
-                      ) : currentOpponent.profileHidden ? (
-                        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                          <div className="flex items-start gap-4">
-                            <div className="rounded-2xl bg-purple-950/40 border border-purple-800/30 p-3 text-white flex items-center justify-center shrink-0">
-                              <UserX size={22} className="text-purple-400" />
-                            </div>
-                            <div>
-                              <h3 className="text-lg font-extrabold text-slate-100 uppercase tracking-tight text-purple-200">Досье скрыто оппонентом</h3>
-                              <p className="mt-1 max-w-xl text-xs text-slate-400 leading-relaxed">
-                                {currentOpponent.name} заплатил за скрытие статистики. Точный процент предательств недоступен, но маскировка профиля сама по себе сигнализирует о стратегической хитрости.
-                              </p>
-                            </div>
+                        ) : (
+                          <div className="rounded-2xl border border-white/5 bg-slate-950 p-6 flex flex-col items-center justify-center text-center">
+                            <span className="relative flex h-5 w-5 mb-3">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-5 w-5 bg-indigo-500"></span>
+                            </span>
+                            <div className="text-xs font-black uppercase text-indigo-400 tracking-widest animate-pulse">Ожидаем решение оппонента</div>
+                            <p className="mt-1 text-[10px] text-slate-500 uppercase font-bold tracking-wiest">
+                              Твой выбор принят сервером и заблокирован от модификации.
+                            </p>
                           </div>
-                          <div className="rounded-xl border border-purple-500/20 bg-purple-500/10 px-4 py-2 text-xs font-black text-purple-400 uppercase tracking-wider text-center shrink-0">
-                            риск неизвестен
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                          <div className="rounded-2xl bg-slate-900/50 p-4 shadow-sm border border-slate-800 flex flex-col justify-between">
-                            <div>
-                              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Предательства</span>
-                              <div className="mt-1.5 text-3xl font-black font-mono text-red-400 leading-none">{opponentRate}%</div>
-                            </div>
-                            <div className="mt-2 text-xs text-slate-500 font-medium">{currentOpponent.betrayals} из {currentOpponent.games} игр</div>
-                          </div>
-                          <div className="rounded-2xl bg-slate-900/50 p-4 shadow-sm border border-slate-800 flex flex-col justify-between">
-                            <div>
-                              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Уровень риска</span>
-                              <div className="mt-1.5">
-                                <span className={`inline-flex rounded-full border px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider ${risk.tone}`}>{risk.title}</span>
-                              </div>
-                            </div>
-                            <div className="mt-2 text-xs text-slate-400 font-medium">{risk.hint}</div>
-                          </div>
-                          <div className="rounded-2xl bg-slate-900/50 p-4 shadow-sm border border-slate-800 flex flex-col justify-between">
-                            <div>
-                              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Назначенная стратегия</span>
-                              <div className="mt-1.5 text-xs font-semibold text-slate-300 leading-snug">
-                                {opponentRate > 60 ? "Высокий шанс, что соперник выберет предательство." : "Можно пробовать сотрудничество, но гарантий нет."}
-                              </div>
-                            </div>
-                            <div className="text-[9px] text-[#6366f1] uppercase font-black tracking-widest mt-2">Анализ завершен</div>
-                          </div>
-                        </div>
-                      )}
-                    </motion.div>
-                  </AnimatePresence>
+                        )}
 
-                  {/* Game payout guidelines (Таблица выплат) */}
-                  <div className="mb-5 rounded-3xl border border-slate-800 bg-slate-900/40 p-4">
-                    <div className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[#94a3b8]">
-                      <AlertTriangle size={14} className="text-amber-500" /> Таблица выплат по протоколу
+                        {/* Blinking Badge if Opponent has submitted first */}
+                        {opponentSubmitted && !isWaitingForOpponent && (
+                          <div className="rounded-xl border border-sky-500/30 bg-sky-500/5 px-4 py-2 flex items-center justify-center gap-2 text-[10px] font-black text-sky-400 uppercase tracking-widest text-center shadow-lg animate-pulse">
+                            <span className="h-1.5 w-1.5 rounded-full bg-sky-400 animate-ping"></span>
+                            Соперник принял свое решение! Выберите ответное действие!
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Result and Reveal Screen */}
+                    {matchResultState && (
+                      <div className="rounded-3xl bg-slate-950 p-5 border border-indigo-500/20 text-slate-100 text-left">
+                        <div className="text-xs font-black uppercase text-[#6366f1] tracking-widest flex items-center gap-1.5 mb-3">
+                          <Radio size={12} className="text-indigo-400 animate-pulse" /> Результат серверного урегулирования
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3 mb-4">
+                          <div className="rounded-xl bg-white/5 p-3 border border-white/5">
+                            <span className="text-[9px] text-slate-500 uppercase font-black tracking-wider block">Твой выбор</span>
+                            <span className={`text-xs font-extrabold uppercase mt-1 block ${matchResultState.playerAction === "betray" ? "text-red-400" : "text-emerald-400"}`}>
+                              {matchResultState.playerAction === "betray" ? "Предал 💀" : "Сотрудничал 🤝"}
+                            </span>
+                          </div>
+                          <div className="rounded-xl bg-white/5 p-3 border border-white/5">
+                            <span className="text-[9px] text-slate-500 uppercase font-black tracking-wider block">Выбор соперника</span>
+                            <span className={`text-xs font-extrabold uppercase mt-1 block ${matchResultState.opponentAction === "betray" ? "text-red-400" : "text-emerald-400"}`}>
+                              {matchResultState.opponentAction === "betray" ? "Предал 💀" : "Сотрудничал 🤝"}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="p-4 rounded-xl border border-white/5 bg-slate-900/60 mb-5">
+                          <h3 className="text-sm font-black uppercase text-indigo-300 leading-none">{matchResultState.title}</h3>
+                          <p className="mt-2 text-xs text-slate-400 leading-relaxed">{matchResultState.text}</p>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3 mb-6">
+                          <div className="rounded-xl bg-white/5 p-3 border border-white/5">
+                            <span className="text-[9px] text-slate-500 uppercase font-black tracking-wider block">Выплата</span>
+                            <span className="text-xl font-black font-mono text-[#6366f1] mt-0.5 block">{fmt(matchResultState.payout)}</span>
+                          </div>
+                          <div className="rounded-xl bg-white/5 p-3 border border-white/5">
+                            <span className="text-[9px] text-slate-500 uppercase font-black tracking-wider block">Разница залога</span>
+                            <span className={`text-xl font-black font-mono mt-0.5 block ${matchResultState.net >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                              {matchResultState.net >= 0 ? "+" : ""}{fmt(matchResultState.net)}
+                            </span>
+                          </div>
+                        </div>
+
+                        <ActionButton onClick={completeMatch} variant="purple">
+                          Завершить Дуэль & Вернуться
+                        </ActionButton>
+                      </div>
+                    )}
+
+                    {/* Tactical logger console */}
+                    <div className="mt-5 rounded-2xl bg-slate-950 border border-indigo-500/10 p-4 text-[#94a3b8] font-mono text-[10px] flex items-start gap-3">
+                      <span className="text-[#6366f1] select-none">&gt;</span>
+                      <p className="flex-1 leading-snug">{message}</p>
                     </div>
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                      <div className="rounded-2xl bg-emerald-950/20 p-4 border border-emerald-500/20">
-                        <div className="font-extrabold text-emerald-400 uppercase text-xs tracking-wider">Оба сотрудничают</div>
-                        <div className="text-xs text-emerald-300 mt-1">Игроки получают по {fmt(COOPERATION_PAYOUT)}</div>
-                      </div>
-                      <div className="rounded-2xl bg-purple-950/20 p-4 border border-purple-500/20">
-                        <div className="font-extrabold text-purple-400 uppercase text-xs tracking-wider">Один предает</div>
-                        <div className="text-xs text-purple-300 mt-1">Предатель получает {fmt(SOLO_BETRAYAL_PAYOUT)}</div>
-                        <div className="mt-2 text-[10px] text-purple-400 font-bold uppercase">Фонд доверия +{fmt(BONUS_POOL_CUT)}</div>
-                      </div>
-                      <div className="rounded-2xl bg-slate-900/60 p-4 border border-slate-700/50">
-                        <div className="font-extrabold text-slate-300 uppercase text-xs tracking-wider">Оба предали</div>
-                        <div className="text-xs text-slate-400 mt-1">Каждый получает обратно {fmt(DOUBLE_BETRAYAL_PAYOUT)}</div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Core Action Zone */}
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                    <ActionButton onClick={() => playRound("cooperate")} disabled={!canPlay} variant="green" icon={ShieldCheck}>
-                      Сотрудничать
-                    </ActionButton>
-                    <ActionButton onClick={() => playRound("betray")} disabled={!canPlay} variant="red" icon={Skull}>
-                      Предать
-                    </ActionButton>
-                    <ActionButton onClick={findNewOpponent} variant="light" icon={RefreshCw}>
-                      Искать другого
-                    </ActionButton>
-                  </div>
-
-                  {/* Dynamic Event Response Stream */}
-                  <div className="mt-5 rounded-3xl bg-slate-950 border border-indigo-500/20 p-5 text-white shadow-xl relative overflow-hidden">
-                    <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-indigo-500 to-indigo-800" />
-                    <div className="text-[10px] font-bold uppercase tracking-widest text-[#94a3b8]">Системный протокол событий</div>
-                    <p className="mt-2 text-base font-bold leading-relaxed text-slate-100">{message}</p>
-                    {lastResult ? (
-                      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4 pt-4 border-t border-white/5">
-                        <div className="rounded-xl bg-white/5 p-3 border border-white/5">
-                          <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wider">Ты выбрал</div>
-                          <div className={`font-black mt-0.5 uppercase text-xs sm:text-sm ${lastResult.playerAction === "betray" ? "text-red-400" : "text-emerald-400"}`}>
-                            {actionText(lastResult.playerAction)}
-                          </div>
-                        </div>
-                        <div className="rounded-xl bg-white/5 p-3 border border-white/5">
-                          <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wider">Соперник выбрал</div>
-                          <div className={`font-black mt-0.5 uppercase text-xs sm:text-sm ${lastResult.opponentAction === "betray" ? "text-red-400" : "text-emerald-400"}`}>
-                            {actionText(lastResult.opponentAction)}
-                          </div>
-                        </div>
-                        <div className="rounded-xl bg-white/5 p-3 border border-white/5">
-                          <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wider">Выплата по ходу</div>
-                          <div className="font-black mt-0.5 text-indigo-300 font-mono text-sm">{fmt(lastResult.payout)}</div>
-                        </div>
-                        <div className="rounded-xl bg-white/5 p-3 border border-white/5">
-                          <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wider">Чистый результат</div>
-                          <div className={`font-black mt-0.5 font-mono text-sm ${lastResult.net >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                            {lastResult.net >= 0 ? "+" : ""}{fmt(lastResult.net)}
-                          </div>
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                </section>
+                  </section>
+                )}
               </div>
             )}
 
