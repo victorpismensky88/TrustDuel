@@ -24,6 +24,7 @@ import {
   CreditCard,
   BookOpen,
   HelpCircle,
+  Lightbulb,
 } from "lucide-react";
 
 interface Opponent {
@@ -259,6 +260,8 @@ export default function App() {
   const [revealedIds, setRevealedIds] = useState<Set<number>>(new Set());
   const [history, setHistory] = useState<HistoryRow[]>([]);
   const [lastResult, setLastResult] = useState<LastResult | null>(null);
+  const [showResultPopup, setShowResultPopup] = useState<boolean>(false);
+  const [showTipPopup, setShowTipPopup] = useState<boolean>(false);
   const [message, setMessage] = useState<string>("Найден соперник. Можно играть вслепую или открыть досье за $0.10.");
 
   // Telegram integration hooks
@@ -284,6 +287,61 @@ export default function App() {
   const [withdrawStep, setWithdrawStep] = useState<number>(0);
   const [withdrawLogs, setWithdrawLogs] = useState<string[]>([]);
   const [withdrawStatus, setWithdrawStatus] = useState<string>("");
+
+  // Динамические советы дня во вкладку "Правила"
+  const tipOfDay = useMemo(() => {
+    if (playerGames === 0) {
+      return {
+        label: "Стартовая стратегия",
+        text: "Вы ещё не провели ни одной дуэли. Рекомендуем начать с аккуратного «Сотрудничества» (🤝). Это заложит прочный фундамент высокой репутации, позволит войти в топ Лиги доверия и сразу зарекомендовать себя надёжным партнёром.",
+        rec: "Репутация строится с самого первого хода!",
+        theme: "border-indigo-500/20 bg-indigo-500/5 text-indigo-300",
+        badge: "Новичок",
+        icon: HelpCircle,
+      };
+    }
+
+    const rate = Math.round((playerBetrayals / playerGames) * 100);
+
+    if (rate <= 15) {
+      return {
+        label: "Благородный стратег",
+        text: `Ваш процент предательств превосходен — всего ${rate}%. Вы олицетворяете высший уровень честности! Однако не забывайте проверять досье соперников перед ходом, особенно если их стиль указан как «хищный» или «агрессивный», чтобы не стать жертвой коварного удара.`,
+        rec: "Минимизируйте риски: используйте проверку досье и скрытие.",
+        theme: "border-emerald-500/20 bg-emerald-500/5 text-emerald-300",
+        badge: "Мудрец",
+        icon: ShieldCheck,
+      };
+    }
+    if (rate <= 40) {
+      return {
+        label: "Рациональный прагматик",
+        text: `Показатель предательств составляет умеренные ${rate}%. Вы успешно балансируете между личной выгодой и доверием. Чтобы претендовать на весомую часть еженедельного бонусного фонда, старайтесь чаще сотрудничать, стимулируя встречную лояльность в последующих играх.`,
+        rec: "Сотрудничество окупается на длинных дистанциях.",
+        theme: "border-indigo-500/20 bg-indigo-500/5 text-indigo-300",
+        badge: "Прагматик",
+        icon: Users,
+      };
+    }
+    if (rate <= 70) {
+      return {
+        label: "Опасная зона доверия",
+        text: `У вас повышенный уровень предательств (${rate}%). Оппоненты видят эту статистику при проверке вашего досье и с высокой вероятностью будут предавать вас превентивно. Попробуйте провести серию из 3-5 раундов исключительно сотрудничая — это очистит вашу историю и вернет доверие соперников.`,
+        rec: "Снизьте темп предательств, чтобы разблокировать общую выгоду.",
+        theme: "border-amber-500/20 bg-amber-500/5 text-amber-300",
+        badge: "Оппортунист",
+        icon: AlertTriangle,
+      };
+    }
+    return {
+      label: "Режим Хищника",
+      text: `Статистика предательств критически высока (${rate}%). Соперники видят в вас прямую угрозу и будут отвечать только предательством, обрекая игры на взаимное обнуление прибыли. Срочно используйте опцию «Шифрования» (🛡️) для сокрытия досье и перестройте стиль игры в пользу мира.`,
+      rec: "Скройте досье щитом на 5 раундов и начните честно.",
+      theme: "border-red-500/20 bg-red-500/5 text-red-400",
+      badge: "Агрессор",
+      icon: Skull,
+    };
+  }, [playerGames, playerBetrayals]);
 
   React.useEffect(() => {
     const webApp = (window as any).Telegram?.WebApp;
@@ -416,6 +474,7 @@ export default function App() {
     const next = pickOpponent(opponents, currentOpponentId);
     setCurrentOpponentId(next.id);
     setLastResult(null);
+    setShowResultPopup(false);
     setMessage("Новый соперник найден. Решай: доверять вслепую или купить досье.");
   };
 
@@ -528,6 +587,7 @@ export default function App() {
 
     setHistory((prev) => [row, ...prev].slice(0, 10));
     setLastResult({ ...result, playerAction, opponentAction, net: row.net });
+    setShowResultPopup(true);
     setMessage(profileJustOpened ? `${result.text} Срок скрытия твоего досье закончился.` : result.text);
   };
 
@@ -545,6 +605,7 @@ export default function App() {
     setRevealedIds(new Set());
     setHistory([]);
     setLastResult(null);
+    setShowResultPopup(false);
     setMessage("Игра сброшена. Баланс снова $20.00.");
   };
 
@@ -713,10 +774,10 @@ export default function App() {
 
           <div className="flex flex-wrap items-center gap-3 mt-2 md:mt-0">
             <button
-              onClick={() => { triggerHaptic('light'); setActiveTab("rules"); }}
+              onClick={() => { triggerHaptic('light'); setShowTipPopup(true); }}
               className="px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-lg border border-indigo-500/25 bg-indigo-550/10 text-indigo-400 hover:bg-indigo-600/20 hover:text-white transition-all select-none cursor-pointer flex items-center gap-2 shadow-md"
             >
-              <BookOpen size={13} /> Правила игры
+              <Lightbulb size={13} className="text-amber-400 animate-pulse" /> Совет дня
             </button>
             <button
               onClick={resetGame}
@@ -728,7 +789,7 @@ export default function App() {
         </header>
 
         {/* Global Statistics Grid */}
-        {(activeTab === "account" || activeTab === "finance" || activeTab === "history") && (
+        {activeTab === "account" && (
           <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
             <StatCard icon={Coins} label="Баланс" value={fmt(balance)} sub="демо-счёт" />
             <StatCard icon={Users} label="Твои игры" value={playerGames} sub="сыгранные раунды" />
@@ -1551,9 +1612,180 @@ export default function App() {
 
 
 
-        <footer className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/40 p-4 text-xs font-medium text-slate-500 leading-relaxed text-center pb-20">
-          <b>Важно:</b> это демо без реальных платежей. В реальном продукте бонусный фонд должен считаться на сервере, а выплаты — закрываться после окончания сезона. Юридически такую механику надо отдельно проверять на признаки азартной игры.
-        </footer>
+        {/* Interactive Duel Result Modal Popup */}
+        <AnimatePresence>
+          {showResultPopup && lastResult && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md"
+              onClick={() => setShowResultPopup(false)}
+            >
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                transition={{ duration: 0.2, ease: "easeOut" }}
+                className="relative w-full max-w-md rounded-3xl border border-white/10 bg-slate-900 p-6 shadow-2xl overflow-hidden select-none"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Accent line based on score net */}
+                <div className={`absolute top-0 inset-x-0 h-[1.5px] bg-gradient-to-r from-transparent ${lastResult.net > 0 ? "via-emerald-500" : lastResult.net < 0 ? "via-rose-500" : "via-slate-550"} to-transparent`}></div>
+                
+                <h3 className="text-xs font-bold text-slate-400 tracking-widest uppercase text-center mb-4 leading-none">
+                  Результат дуэли
+                </h3>
+
+                {/* Matchup visual comparison */}
+                <div className="flex items-center justify-between mb-5 bg-slate-950/60 p-4 rounded-2xl border border-white/5 relative overflow-hidden">
+                  {/* Left Player (You) */}
+                  <div className="flex flex-col items-center gap-1.5 flex-1 z-10">
+                    <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 to-indigo-550 border border-indigo-400/30 flex items-center justify-center text-2xl shadow-md select-none">
+                      {isTelegram ? "📱" : "🧑‍🚀"}
+                    </div>
+                    <span className="text-[11px] font-bold text-slate-300">Ты</span>
+                    <span className={`text-[10px] uppercase font-black tracking-widest px-2 py-0.5 rounded-md ${
+                      lastResult.playerAction === "betray" ? "bg-red-550/10 text-red-400 border border-red-500/15" : "bg-emerald-550/10 text-emerald-400 border border-emerald-500/15"
+                    }`}>
+                      {lastResult.playerAction === "betray" ? "Предал" : "Сотрудничал"}
+                    </span>
+                  </div>
+
+                  {/* VS indicator */}
+                  <div className="flex flex-col items-center text-slate-500 space-y-1 mx-2 shrink-0">
+                    <span className="text-[11px] font-black tracking-widest text-[#6366f1] animate-pulse">VS</span>
+                    <div className="h-[1px] w-6 bg-slate-800" />
+                  </div>
+
+                  {/* Right Player (Opponent) */}
+                  <div className="flex flex-col items-center gap-1.5 flex-1 z-10">
+                    <div className="w-14 h-14 rounded-2xl bg-slate-950 border border-white/10 flex items-center justify-center text-3xl shadow-md select-none">
+                      {currentOpponent.avatar}
+                    </div>
+                    <span className="text-[11px] font-bold text-slate-300 truncate max-w-[80px]">{currentOpponent.name}</span>
+                    <span className={`text-[10px] uppercase font-black tracking-widest px-2 py-0.5 rounded-md ${
+                      lastResult.opponentAction === "betray" ? "bg-red-550/10 text-red-400 border border-red-500/15" : "bg-emerald-550/10 text-emerald-400 border border-emerald-500/15"
+                    }`}>
+                      {lastResult.opponentAction === "betray" ? "Предал" : "Сотрудничал"}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Outcome badge & subtitle */}
+                <div className="text-center mb-6">
+                  <div className={`text-xl font-black uppercase tracking-tight ${
+                    lastResult.net > 0 ? "text-emerald-400" : lastResult.net < 0 ? "text-[#f43f5e]" : "text-indigo-300"
+                  }`}>
+                    {lastResult.title}
+                  </div>
+                  <div className="mt-2.5 text-xs text-slate-300 leading-relaxed font-semibold px-2">
+                    {lastResult.text}
+                  </div>
+                </div>
+
+                {/* Financial Summary */}
+                <div className="grid grid-cols-2 gap-3 mb-6">
+                  <div className="rounded-2xl bg-slate-950/40 p-3.5 border border-white/5 text-center">
+                    <div className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">Выплата за раунд</div>
+                    <div className="text-lg font-black text-indigo-300 font-mono mt-0.5">{fmt(lastResult.payout)}</div>
+                  </div>
+                  <div className="rounded-2xl bg-slate-950/40 p-3.5 border border-white/5 text-center">
+                    <div className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">Твоя прибыль</div>
+                    <div className={`text-lg font-black font-mono mt-0.5 ${
+                      lastResult.net >= 0 ? "text-emerald-400" : "text-[#f43f5e]"
+                    }`}>
+                      {lastResult.net >= 0 ? "+" : ""}{fmt(lastResult.net)}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Bottom Choice CTA Row */}
+                <div className="space-y-2.5">
+                  <button
+                    onClick={() => {
+                      triggerHaptic('medium');
+                      setShowResultPopup(false);
+                      setMessage(`Сыграем еще раз с соперником ${currentOpponent.name}. Оцени риски и сделай выбор!`);
+                    }}
+                    className="w-full py-3 bg-indigo-600 hover:bg-indigo-550 text-white font-extrabold text-xs uppercase tracking-widest rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-indigo-950/40 hover:scale-[1.01] active:scale-[0.98]"
+                  >
+                    Собраться на реванш <Gamepad2 size={13} />
+                  </button>
+                  <button
+                    onClick={() => {
+                      triggerHaptic('light');
+                      findNewOpponent();
+                    }}
+                    className="w-full py-3 bg-slate-800 hover:bg-slate-755 text-slate-300 hover:text-white font-extrabold text-xs uppercase tracking-widest rounded-xl border border-slate-700/60 transition-all cursor-pointer flex items-center justify-center gap-2 hover:scale-[1.01] active:scale-[0.98]"
+                  >
+                    Искать нового соперника <RefreshCw size={12} className="animate-spin-slow" />
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Interactive Tip Of The Day Modal Popup */}
+        <AnimatePresence>
+          {showTipPopup && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md"
+              onClick={() => setShowTipPopup(false)}
+            >
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                transition={{ duration: 0.2, ease: "easeOut" }}
+                className="relative w-full max-w-md rounded-3xl border border-white/10 bg-slate-900 p-6 shadow-2xl overflow-hidden select-none"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Dynamic accent line based on style */}
+                <div className="absolute top-0 inset-x-0 h-[1.5px] bg-gradient-to-r from-transparent via-indigo-500/50 to-transparent"></div>
+
+                <div className="flex items-center gap-2 mb-4 justify-center">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-[#818cf8] font-mono">Совет дня</span>
+                  <span className="text-[9px] px-2 py-0.5 font-bold uppercase tracking-wider rounded-md bg-white/10 text-white font-mono">{tipOfDay.badge}</span>
+                </div>
+
+                <h3 className="text-lg font-extrabold text-white tracking-tight text-center mb-4 flex items-center justify-center gap-2">
+                  <div className="p-2 rounded-xl bg-slate-950 border border-white/10 flex items-center justify-center text-indigo-400">
+                    <tipOfDay.icon size={18} className="animate-pulse" />
+                  </div>
+                  {tipOfDay.label}
+                </h3>
+
+                <p className="text-xs md:text-sm text-slate-300 leading-relaxed text-center mb-5 px-1 font-medium">
+                  {tipOfDay.text}
+                </p>
+
+                <div className="mb-6 p-3.5 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-xs text-indigo-300 text-left flex items-start gap-2 font-semibold">
+                  <span className="text-base shrink-0">💡</span>
+                  <div>
+                    <span className="font-bold">Рекомендация:</span> {tipOfDay.rec}
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => {
+                    triggerHaptic('light');
+                    setShowTipPopup(false);
+                  }}
+                  className="w-full py-3 bg-indigo-600 hover:bg-indigo-550 text-white font-extrabold text-[#ffffff] text-xs uppercase tracking-widest rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-indigo-950/40 hover:scale-[1.01] active:scale-[0.98]"
+                >
+                  Понятно, спасибо!
+                </button>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+
       </div>
     </div>
   );
