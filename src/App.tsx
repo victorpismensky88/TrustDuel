@@ -307,6 +307,7 @@ export default function App() {
   // Multi-user WebSocket & Matchmaker States
   const [socket, setSocket] = useState<Socket | null>(null);
   const [onlineCount, setOnlineCount] = useState<number>(1);
+  const [queueCount, setQueueCount] = useState<number>(0);
   const [isSearching, setIsSearching] = useState<boolean>(false);
   const [searchDuration, setSearchDuration] = useState<number>(0);
   const [activeMatch, setActiveMatch] = useState<{
@@ -360,8 +361,9 @@ export default function App() {
       console.log("WebSocket connected successfully:", s.id);
     });
 
-    s.on("server-stats", (data: { onlineCount: number; bonusPool: number }) => {
+    s.on("server-stats", (data: { onlineCount: number; queueCount?: number; bonusPool: number }) => {
       if (data.onlineCount) setOnlineCount(data.onlineCount);
+      if (typeof data.queueCount === "number") setQueueCount(data.queueCount);
       if (data.bonusPool) setBonusPool(data.bonusPool);
     });
 
@@ -526,6 +528,13 @@ export default function App() {
       balance: balance
     });
     setMessage("Поиск нового оппонента в защищенном пуле Лиги Доверия...");
+  };
+
+  const forceBotMatch = () => {
+    if (!socket) return;
+    triggerHaptic("medium");
+    socket.emit("force-bot-match");
+    setMessage("Запуск симулированного бота для тестирования...");
   };
 
   // Динамические советы дня во вкладку "Правила"
@@ -920,76 +929,48 @@ export default function App() {
             setIsWithdrawing(false);
             setWithdrawStep(5);
             setWithdrawAmount("");
-            setWithdrawLogs(prev => [...prev, "[SUCCESS] Транзакция выполнена! Демо-баланс обновлен."]);
-            setMessage(`Заявка на вывод выполнена: -${fmt(finalAmount)} на ${withdrawAddress.substring(0, Math.min(10, withdrawAddress.length))}...`);
-            setWithdrawStatus(`Средства в размере ${fmt(finalAmount)} успешно выведены!`);
+            setWithdrawLogs(prev => [
+              ...prev,
+              `[SUCCESS] Транзакция выполнена! Демо-средства отправлены по адресу: ${withdrawAddress}`,
+              `[INFO] Хэш транзакции: TX_DUEL_${Math.random().toString(36).substring(2, 9).toUpperCase()}`
+            ]);
             triggerHaptic('success');
-            setTimeout(() => setWithdrawStatus(""), 4000);
-          }, 1200);
-        }, 1000);
+            setMessage(`Запрос на вывод зарегистрирован! Списано: ${fmt(finalAmount)}.`);
+            setTimeout(() => {
+              setWithdrawStep(0);
+              setWithdrawLogs([]);
+            }, 6000);
+          }, 1500);
+        }, 1200);
       }, 1000);
     }, 800);
   };
 
   if (isAuthenticating) {
     return (
-      <div className="min-h-screen bg-[#0f172a] bg-[radial-gradient(ellipse_at_top,#1e1b4b,transparent_60%),linear-gradient(185deg,#0f172a,#020617)] text-slate-100 flex items-center justify-center p-4 font-sans selection:bg-indigo-500/30 selection:text-white">
-        <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-slate-900/60 p-6 md:p-8 shadow-2xl backdrop-blur-md relative overflow-hidden text-center">
-          <div className="absolute top-0 inset-x-0 h-[1.5px] bg-gradient-to-r from-transparent via-indigo-500/50 to-transparent"></div>
-          
-          <div className="mb-6 mx-auto w-16 h-16 bg-gradient-to-tr from-indigo-600 to-violet-500 rounded-2xl flex items-center justify-center font-black text-2xl text-white shadow-xl border border-indigo-400/30 select-none animate-pulse">
-            TD
+      <div className="flex min-h-screen items-center justify-center bg-slate-950 text-white font-sans">
+        <div className="text-center px-4 max-w-sm">
+          {/* Animated lock or keyhole icon */}
+          <div className="mx-auto w-16 h-16 rounded-3xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400 mb-6 animate-pulse">
+            <Lock size={32} />
           </div>
-
-          <h1 className="text-xl font-black uppercase tracking-widest text-slate-100 mb-1">
-            Trust Duel
-          </h1>
-          <p className="text-[10px] text-indigo-400 font-bold uppercase tracking-widest mb-6 leading-none">
-            Telegram WebApp Integration
+          <h2 className="text-lg font-black tracking-wider uppercase text-white animate-pulse">
+            Вход в систему...
+          </h2>
+          <div className="mt-4 w-full bg-slate-900 border border-slate-800 h-2 rounded-full overflow-hidden">
+            <div className="bg-indigo-500 h-full transition-all duration-300" style={{ width: `${authProgress}%` }}></div>
+          </div>
+          <p className="mt-3 text-[11px] text-slate-400 font-mono tracking-tight leading-relaxed">
+            {authStatusText}
           </p>
-
-          <div className="space-y-3 mb-6 bg-slate-950/40 p-3 rounded-2xl border border-white/5">
-            <div className="w-full bg-slate-900 rounded-full h-1.5 overflow-hidden">
-              <motion.div 
-                className="bg-indigo-500 h-full"
-                animate={{ width: `${authProgress}%` }}
-                transition={{ ease: "easeOut" }}
-              />
-            </div>
-            <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono">
-              <span className="truncate pr-2">{authStatusText}</span>
-              <span className="font-bold shrink-0">{authProgress}%</span>
-            </div>
-          </div>
-
-          <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 text-left mb-6">
-            <div className="text-[9px] uppercase tracking-widest text-[#94a3b8] font-bold mb-2">Обнаружен аккаунт</div>
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-indigo-600/10 border border-indigo-500/20 flex items-center justify-center text-xl select-none shrink-0">
-                {tgUser ? "📱" : "🧑‍🚀"}
-              </div>
-              <div className="min-w-0">
-                <div className="text-xs font-black text-slate-100 truncate leading-none">
-                  {tgUser ? (tgUser.first_name) : "Демо Игрок"}
-                </div>
-                <div className="text-[9px] text-[#94a3b8] font-mono mt-1">
-                  {tgUser && tgUser.username ? `@${tgUser.username}` : "Secure Iframe Mode"}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="text-[9px] text-slate-500 font-mono leading-relaxed uppercase tracking-wider">
-            Подключение защищено сквозным HMAC-SHA256
-          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#0f172a] bg-[radial-gradient(ellipse_at_top,#1e1b4b,transparent_60%),linear-gradient(185deg,#0f172a,#020617)] text-slate-100 p-4 md:p-8 font-sans selection:bg-indigo-500/30 selection:text-white">
-      <div className="mx-auto max-w-7xl">
+    <div id="app-root" className="min-h-screen bg-slate-950 text-white font-sans antialiased overflow-y-auto selection:bg-indigo-500/30">
+      <div className="relative mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
         <header className="mb-6 flex items-center rounded-2xl bg-slate-800/50 border border-white/10 p-5 backdrop-blur shadow-xl">
           <div className="flex items-center gap-4">
             <div className="w-11 h-11 bg-indigo-600 rounded-xl flex items-center justify-center font-black text-xl text-white shadow-lg border border-indigo-400/30 select-none">
@@ -1074,7 +1055,7 @@ export default function App() {
                     </div>
 
                     <p className="mt-3 text-[10px] text-slate-500 font-medium">
-                      * Если в течение 15 секунд реальный оппонент не будет найден, сервер подключит симулирующего бота для прохождения теста.
+                      * Поиск происходит среди реальных игроков онлайн. При желании вы сможете мгновенно подключить тренировочного ИИ-бота в процессе сканирования.
                     </p>
                   </section>
                 )}
@@ -1111,15 +1092,32 @@ export default function App() {
                       <div className="text-2xl font-black font-mono text-white mt-1">
                         00:{searchDuration < 10 ? `0${searchDuration}` : searchDuration}
                       </div>
-                      <p className="mt-2 text-xs text-slate-400 max-w-xs mx-auto">
-                        Защищенный сокет подключен. Ищем свободного оппонента в Лиге доверия...
+                      
+                      {/* Live Network Indicators */}
+                      <div className="mt-3 flex items-center justify-center gap-3 select-none">
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 px-3 py-1 text-[10px] font-bold font-mono text-indigo-300">
+                          Игроков онлайн: {onlineCount}
+                        </span>
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 text-[10px] font-bold font-mono text-emerald-400">
+                          В поиске: {queueCount}
+                        </span>
+                      </div>
+
+                      <p className="mt-4 text-xs text-slate-400 max-w-xs mx-auto leading-relaxed">
+                        Защищенный сокет подключен. Ожидаем входа свободного соперника в реальном времени...
                       </p>
                     </div>
 
-                    <div className="mt-6 w-full max-w-xs z-10">
+                    <div className="mt-6 w-full max-w-xs z-10 flex flex-col gap-2.5">
+                      <button
+                        onClick={forceBotMatch}
+                        className="w-full flex items-center justify-center gap-2 rounded-xl border border-transparent bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 hover:from-amber-400 hover:to-amber-500 active:scale-[0.98] transition-all py-3 text-xs font-bold uppercase tracking-wider select-none cursor-pointer shadow-lg shadow-amber-500/10"
+                      >
+                        Сыграть с ИИ-ботом прямо сейчас
+                      </button>
                       <button
                         onClick={cancelMatchmaking}
-                        className="w-full rounded-xl border border-slate-700 bg-slate-900/60 text-slate-300 hover:bg-slate-800 hover:text-white transition-all py-2.5 text-xs font-bold uppercase tracking-wider select-none cursor-pointer"
+                        className="w-full rounded-xl border border-slate-700 bg-slate-900/60 text-slate-400 hover:bg-slate-800 hover:text-white transition-all py-2 text-xs font-bold uppercase tracking-wider select-none cursor-pointer"
                       >
                         Отменить Поиск
                       </button>

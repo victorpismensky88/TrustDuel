@@ -64,15 +64,69 @@ async function startServer() {
     });
   });
 
+  // Global broadcaster for updated server stats
+  function broadcastServerStats() {
+    io.emit("server-stats", {
+      onlineCount: io.sockets.sockets.size,
+      queueCount: matchQueue.length,
+      bonusPool: globalBonusPool
+    });
+  }
+
+  // Helper to trigger bot matchmaking authoritatively
+  function triggerBotMatch(clientSocket: Socket, playerDetails: PlayerDetails) {
+    const bots = [
+      { name: "QuietFox", games: 43, betrayals: 7, avatar: "🦊", style: "осторожный", profileHidden: false, rate: 16 },
+      { name: "IronSmile", games: 88, betrayals: 61, avatar: "😈", style: "агрессивный", profileHidden: true, rate: 69 },
+      { name: "MiraTrust", games: 27, betrayals: 2, avatar: "🕊️", style: "доверчивый", profileHidden: false, rate: 7 },
+      { name: "ZeroLuck", games: 112, betrayals: 54, avatar: "🎲", style: "хаотичный", profileHidden: false, rate: 48 },
+      { name: "BankerCat", games: 64, betrayals: 18, avatar: "🐈", style: "прагматичный", profileHidden: false, rate: 28 },
+      { name: "RedWolf", games: 151, betrayals: 119, avatar: "🐺", style: "хищник", profileHidden: true, rate: 79 },
+    ];
+    const bot = bots[Math.floor(Math.random() * bots.length)];
+    const botId = `bot_${Date.now()}`;
+
+    const botDetails: PlayerDetails = {
+      id: botId,
+      name: bot.name,
+      games: bot.games,
+      betrayals: bot.betrayals,
+      avatar: bot.avatar,
+      style: bot.style,
+      profileHidden: bot.profileHidden,
+      balance: 20
+    };
+
+    const roomId = `room_bot_${Date.now()}`;
+    const room: MatchRoom = {
+      roomId,
+      players: {
+        [clientSocket.id]: { details: playerDetails, ready: true }
+      },
+      botMode: true,
+      botDetails,
+      status: "playing",
+      createdAt: Date.now()
+    };
+
+    activeRooms.set(roomId, room);
+    clientSocket.join(roomId);
+
+    clientSocket.emit("match-found", {
+      roomId,
+      opponent: botDetails,
+      yourRole: "player1"
+    });
+
+    console.log(`Match created: Player vs Bot [${playerDetails.name} vs ${bot.name}] in ${roomId}`);
+  }
+
   // Core WebSocket Matchmaking and Game Logic
   io.on("connection", (socket: Socket) => {
     console.log(`Socket connected: ${socket.id}`);
 
-    // Notify user of active server metrics
-    socket.emit("server-stats", {
-      onlineCount: io.sockets.sockets.size,
-      bonusPool: globalBonusPool
-    });
+    // Instantly sync metrics in real-time
+    broadcastServerStats();
 
     socket.on("join-queue", (details: PlayerDetails) => {
       // Clear any existing instances of this socket in queue or active rooms
@@ -125,66 +179,36 @@ async function startServer() {
         // Enqueue current user
         matchQueue.push({ socket, details: playerDetails });
 
-        // Set up a fallback matching bot if no real player arrives in 4 seconds
+        // Backup safety server auto-trigger bot ONLY after 60 seconds of complete idle
         setTimeout(() => {
-          // Check if this socket is still in the queue looking for a partner
           const index = matchQueue.findIndex((q) => q.socket.id === socket.id);
           if (index !== -1) {
-            matchQueue.splice(index, 1); // Remove from queue
-
-            // Generate an interesting computer opponent
-            const bots = [
-              { name: "QuietFox", games: 43, betrayals: 7, avatar: "🦊", style: "осторожный", profileHidden: false, rate: 16 },
-              { name: "IronSmile", games: 88, betrayals: 61, avatar: "😈", style: "агрессивный", profileHidden: true, rate: 69 },
-              { name: "MiraTrust", games: 27, betrayals: 2, avatar: "🕊️", style: "доверчивый", profileHidden: false, rate: 7 },
-              { name: "ZeroLuck", games: 112, betrayals: 54, avatar: "🎲", style: "хаотичный", profileHidden: false, rate: 48 },
-              { name: "BankerCat", games: 64, betrayals: 18, avatar: "🐈", style: "прагматичный", profileHidden: false, rate: 28 },
-              { name: "RedWolf", games: 151, betrayals: 119, avatar: "🐺", style: "хищник", profileHidden: true, rate: 79 },
-            ];
-            const bot = bots[Math.floor(Math.random() * bots.length)];
-            const botId = `bot_${Date.now()}`;
-
-            const botDetails: PlayerDetails = {
-              id: botId,
-              name: bot.name,
-              games: bot.games,
-              betrayals: bot.betrayals,
-              avatar: bot.avatar,
-              style: bot.style,
-              profileHidden: bot.profileHidden,
-              balance: 20
-            };
-
-            const roomId = `room_bot_${Date.now()}`;
-            const room: MatchRoom = {
-              roomId,
-              players: {
-                [socket.id]: { details: playerDetails, ready: true }
-              },
-              botMode: true,
-              botDetails,
-              status: "playing",
-              createdAt: Date.now()
-            };
-
-            activeRooms.set(roomId, room);
-            socket.join(roomId);
-
-            socket.emit("match-found", {
-              roomId,
-              opponent: botDetails,
-              yourRole: "player1"
-            });
-
-            console.log(`Match created: Player vs Bot [${playerDetails.name} vs ${bot.name}] in ${roomId}`);
+            const item = matchQueue[index];
+            matchQueue.splice(index, 1);
+            triggerBotMatch(socket, item.details);
+            broadcastServerStats();
           }
-        }, 15000);
+        }, 60000);
+      }
+
+      broadcastServerStats();
+    });
+
+    socket.on("force-bot-match", () => {
+      // Find player in queue
+      const index = matchQueue.findIndex((q) => q.socket.id === socket.id);
+      if (index !== -1) {
+        const item = matchQueue[index];
+        matchQueue.splice(index, 1);
+        triggerBotMatch(socket, item.details);
+        broadcastServerStats();
       }
     });
 
     socket.on("leave-queue", () => {
       matchQueue = matchQueue.filter((q) => q.socket.id !== socket.id);
       console.log(`Player walked away, socket ${socket.id} removed from matchmaking queue.`);
+      broadcastServerStats();
     });
 
     socket.on("leave-room", ({ roomId }: { roomId: string }) => {
@@ -197,6 +221,7 @@ async function startServer() {
         activeRooms.delete(roomId);
         socket.leave(roomId);
         console.log(`Socket ${socket.id} explicitly left active room ${roomId}: search another player`);
+        broadcastServerStats();
       }
     });
 
@@ -314,6 +339,7 @@ async function startServer() {
           activeRooms.delete(roomId);
         }
       }
+      broadcastServerStats();
     });
   });
 
