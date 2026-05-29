@@ -30,6 +30,8 @@ import {
   Compass,
   Crosshair,
   Radio,
+  Coffee,
+  Heart,
 } from "lucide-react";
 
 interface Opponent {
@@ -278,6 +280,8 @@ export default function App() {
   const [lastResult, setLastResult] = useState<LastResult | null>(null);
   const [showResultPopup, setShowResultPopup] = useState<boolean>(false);
   const [showTipPopup, setShowTipPopup] = useState<boolean>(false);
+  const [showDonatePopup, setShowDonatePopup] = useState<boolean>(false);
+  const [copiedCard, setCopiedCard] = useState<boolean>(false);
   const [message, setMessage] = useState<string>("Найден соперник. Можно играть вслепую или открыть досье за $0.10.");
 
   // Telegram integration hooks
@@ -2324,8 +2328,30 @@ export default function App() {
           )}
         </AnimatePresence>
 
-        {/* Floating "Совет дня" Action Button */}
-        <div className="fixed bottom-24 right-4 md:right-8 z-40 flex flex-col items-end gap-2 select-none">
+        {/* Floating Actions (Донат & Совет дня) */}
+        <div className="fixed bottom-24 right-4 md:right-8 z-40 flex flex-col items-end gap-2.5 select-none">
+          {/* Donation Floating Button */}
+          <button
+            onClick={() => {
+              triggerHaptic('light');
+              setShowDonatePopup(true);
+            }}
+            className="p-3.5 rounded-full bg-slate-900/95 border border-rose-500/30 text-[#f43f5e] hover:text-rose-400 shadow-[0_4px_20px_rgba(244,63,94,0.35)] hover:shadow-[0_4px_25px_rgba(244,63,94,0.55)] active:scale-95 transition-all cursor-pointer relative group flex items-center justify-center backdrop-blur-md"
+            title="Поддержать автора"
+          >
+            {/* Outer pulsating wave ring */}
+            <span className="absolute inset-0 rounded-full bg-rose-500/10 animate-ping opacity-60"></span>
+            
+            {/* Inner pulsing heart icon */}
+            <Heart size={21} className="relative z-10 animate-pulse text-[#f43f5e]" fill="#f43f5e" />
+            
+            {/* Hint tag revealed on hover */}
+            <span className="absolute right-full mr-3 px-2.5 py-1 text-[10px] font-bold text-[#f43f5e] bg-slate-900/95 border border-rose-500/20 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-xl">
+              Угостить кофе ❤️️
+            </span>
+          </button>
+
+          {/* Floating "Совет дня" Action Button */}
           <button
             onClick={() => {
               triggerHaptic('light');
@@ -2338,7 +2364,7 @@ export default function App() {
             <span className="absolute inset-0 rounded-full bg-amber-500/10 animate-ping opacity-60"></span>
             
             {/* Inner pulsing bulb */}
-            <Lightbulb size={22} className="relative z-10 animate-pulse text-amber-400" />
+            <Lightbulb size={21} className="relative z-10 animate-pulse text-amber-400" />
             
             {/* Hint tag revealed on hover */}
             <span className="absolute right-full mr-3 px-2.5 py-1 text-[10px] font-bold text-amber-400 bg-slate-900/95 border border-amber-500/20 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-xl">
@@ -2346,6 +2372,107 @@ export default function App() {
             </span>
           </button>
         </div>
+
+        {/* Interactive Donat Modal Popup */}
+        <AnimatePresence>
+          {showDonatePopup && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md"
+              onClick={() => {
+                setShowDonatePopup(false);
+                setCopiedCard(false);
+              }}
+            >
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                transition={{ duration: 0.2, ease: "easeOut" }}
+                className="relative w-full max-w-md rounded-3xl border border-white/10 bg-slate-900 p-6 shadow-2xl overflow-hidden select-none"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Dynamic accent line based on style */}
+                <div className="absolute top-0 inset-x-0 h-[1.5px] bg-gradient-to-r from-transparent via-rose-500/50 to-transparent"></div>
+
+                <div className="flex items-center gap-2 mb-4 justify-center">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-[#f43f5e] font-mono">Поддержка проекта</span>
+                  <span className="text-[9px] px-2 py-0.5 font-bold uppercase tracking-wider rounded-md bg-rose-500/10 text-[#f43f5e] border border-rose-500/20 font-mono">Чашка кофе ☕️</span>
+                </div>
+
+                <h3 className="text-lg font-extrabold text-white tracking-tight text-center mb-4 flex items-center justify-center gap-1.5">
+                  <div className="p-2 rounded-xl bg-slate-950 border border-white/10 flex items-center justify-center text-[#f43f5e]">
+                    <Coffee size={18} className="animate-pulse" />
+                  </div>
+                  Купить разработчику кофе
+                </h3>
+
+                <p className="text-xs md:text-sm text-slate-300 leading-relaxed text-center mb-5 px-1 font-medium">
+                  Если вам нравятся Дуэли <b>Trust Duel</b> и вы хотите помочь разработчику продолжать развивать Лигу Доверия, вы можете угостить его горячей чашечкой кофе! Нам будет невероятно приятно ❤️
+                </p>
+
+                {/* Styled Credit Card / Donation Info */}
+                <div 
+                  onClick={() => {
+                    navigator.clipboard.writeText("4441111055575918");
+                    setCopiedCard(true);
+                    triggerHaptic('success');
+                    setTimeout(() => setCopiedCard(false), 2000);
+                  }}
+                  className="mb-6 rounded-2xl bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 border border-white/10 p-5 relative overflow-hidden group cursor-pointer active:scale-[0.99] transition-all shadow-inner"
+                >
+                  {/* Subtle decorative credit card chip */}
+                  <div className="absolute top-5 right-5 w-8 h-6 rounded bg-gradient-to-tr from-amber-500 to-amber-300/30 opacity-70 border border-amber-500/20"></div>
+                  
+                  <div className="text-[9px] text-slate-500 font-extrabold uppercase tracking-widest mb-1.5 flex items-center gap-1">
+                    <CreditCard size={10} /> Номер банковской карты
+                  </div>
+                  
+                  <div className="text-lg md:text-xl font-bold text-slate-100 font-mono tracking-widest group-hover:text-rose-400 transition-colors">
+                    4441 1110 5557 5918
+                  </div>
+
+                  <div className="mt-4 flex items-center justify-between text-[10px] font-semibold text-slate-400">
+                    <div>ПОЛУЧАТЕЛЬ: РАЗРАБОТЧИК</div>
+                    <div className="flex items-center gap-1 text-xs">
+                      {copiedCard ? (
+                        <span className="font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded animate-bounce">Скопировано!</span>
+                      ) : (
+                        <span className="font-semibold group-hover:underline flex items-center gap-1 font-mono text-[9px] uppercase tracking-wider text-slate-500 group-hover:text-rose-400 transition-colors">Кликните для копирования</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex gap-2.5">
+                  <button
+                    onClick={() => {
+                      triggerHaptic('light');
+                      setShowDonatePopup(false);
+                      setCopiedCard(false);
+                    }}
+                    className="flex-1 py-3 bg-slate-800 hover:bg-slate-750 text-slate-300 font-extrabold text-xs uppercase tracking-widest rounded-xl transition-all cursor-pointer border border-slate-700/60 hover:text-white"
+                  >
+                    Закрыть
+                  </button>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText("4441111055575918");
+                      setCopiedCard(true);
+                      triggerHaptic('success');
+                      setTimeout(() => setCopiedCard(false), 2000);
+                    }}
+                    className="flex-1 py-3 bg-gradient-to-r from-rose-600 to-rose-500 bg-[#e11d48] hover:bg-[#f43f5e] text-white font-extrabold text-xs uppercase tracking-widest rounded-xl transition-all cursor-pointer shadow-lg shadow-rose-950/40 hover:scale-[1.01] active:scale-[0.98]"
+                  >
+                    Скопировать карту
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Interactive Tip Of The Day Modal Popup */}
         <AnimatePresence>
