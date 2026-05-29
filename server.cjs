@@ -136,7 +136,7 @@ async function startServer() {
             });
             console.log(`Match created: Player vs Bot [${playerDetails.name} vs ${bot.name}] in ${roomId}`);
           }
-        }, 4e3);
+        }, 15e3);
       }
     });
     socket.on("leave-queue", () => {
