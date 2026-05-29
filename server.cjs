@@ -149,12 +149,32 @@ async function startServer() {
       }
       broadcastServerStats();
     });
-    socket.on("force-bot-match", () => {
+    socket.on("force-bot-match", (clientDetails) => {
       const index = matchQueue.findIndex((q) => q.socket.id === socket.id);
       if (index !== -1) {
         const item = matchQueue[index];
         matchQueue.splice(index, 1);
         triggerBotMatch(socket, item.details);
+        broadcastServerStats();
+      } else if (clientDetails) {
+        const playerDetails = {
+          ...clientDetails,
+          id: socket.id
+        };
+        triggerBotMatch(socket, playerDetails);
+        broadcastServerStats();
+      } else {
+        const playerDetails = {
+          id: socket.id,
+          name: `\u0418\u0433\u0440\u043E\u043A_${socket.id?.substring(0, 4) || "You"}`,
+          games: 0,
+          betrayals: 0,
+          avatar: "\u{1F464}",
+          style: "\u043E\u0441\u0442\u043E\u0440\u043E\u0436\u043D\u044B\u0439",
+          profileHidden: false,
+          balance: 20
+        };
+        triggerBotMatch(socket, playerDetails);
         broadcastServerStats();
       }
     });
