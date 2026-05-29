@@ -336,6 +336,21 @@ export default function App() {
     net: number;
   } | null>(null);
 
+  const activeMatchRef = React.useRef(activeMatch);
+  React.useEffect(() => {
+    activeMatchRef.current = activeMatch;
+  }, [activeMatch]);
+
+  const balanceRef = React.useRef(balance);
+  React.useEffect(() => {
+    balanceRef.current = balance;
+  }, [balance]);
+
+  const playerProfileHiddenRef = React.useRef(playerProfileHidden);
+  React.useEffect(() => {
+    playerProfileHiddenRef.current = playerProfileHidden;
+  }, [playerProfileHidden]);
+
   React.useEffect(() => {
     // Connect to the unified server at root (the port is handled transparently)
     const s = io();
@@ -382,20 +397,23 @@ export default function App() {
         setPlayerBetrayals((v) => v + 1);
       }
 
+      const oppName = activeMatchRef.current?.opponent.name || "Соперник";
+      const oppAvatar = activeMatchRef.current?.opponent.avatar || "👤";
+
       // Add a record to history
       const row: HistoryRow = {
         id: Date.now(),
         // Check if opponent action is betray
-        opponent: data.opponentAction === "betray" ? `[Duel] ${activeMatch?.opponent.name || "Соперник"} (ПРЕДАТЕЛЬ)` : `[Duel] ${activeMatch?.opponent.name || "Соперник"} (ДОВЕРИЕ)`,
-        avatar: activeMatch?.opponent.avatar || "👤",
+        opponent: data.opponentAction === "betray" ? `[Duel] ${oppName} (ПРЕДАТЕЛЬ)` : `[Duel] ${oppName} (ДОВЕРИЕ)`,
+        avatar: oppAvatar,
         playerAction: data.playerAction,
         opponentAction: data.opponentAction,
         payout: data.payout,
         net: data.net,
         title: data.title,
-        balance: Number((balance - ENTRY_FEE + data.payout).toFixed(2)),
+        balance: Number((balanceRef.current - ENTRY_FEE + data.payout).toFixed(2)),
         economy: data.economy,
-        profileHiddenDuringRound: playerProfileHidden,
+        profileHiddenDuringRound: playerProfileHiddenRef.current,
       };
 
       setHistory((prev) => [row, ...prev].slice(0, 10));
@@ -414,7 +432,7 @@ export default function App() {
     return () => {
       s.disconnect();
     };
-  }, [activeMatch, playerProfileHidden, balance]);
+  }, []);
 
   React.useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -1056,7 +1074,7 @@ export default function App() {
                     </div>
 
                     <p className="mt-3 text-[10px] text-slate-500 font-medium">
-                      * Если в течение 4 секунд реальный оппонент не будет найден, сервер подключит симулирующего бота для прохождения теста.
+                      * Если в течение 15 секунд реальный оппонент не будет найден, сервер подключит симулирующего бота для прохождения теста.
                     </p>
                   </section>
                 )}

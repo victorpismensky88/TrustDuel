@@ -178,7 +178,7 @@ async function startServer() {
 
             console.log(`Match created: Player vs Bot [${playerDetails.name} vs ${bot.name}] in ${roomId}`);
           }
-        }, 4000);
+        }, 15000);
       }
     });
 
