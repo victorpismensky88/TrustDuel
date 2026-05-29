@@ -307,6 +307,7 @@ export default function App() {
   // Multi-user WebSocket & Matchmaker States
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isSocketConnected, setIsSocketConnected] = useState<boolean>(false);
+  const [isClientSideBotMatch, setIsClientSideBotMatch] = useState<boolean>(false);
   const [onlineCount, setOnlineCount] = useState<number>(1);
   const [queueCount, setQueueCount] = useState<number>(0);
   const [isSearching, setIsSearching] = useState<boolean>(false);
@@ -354,13 +355,23 @@ export default function App() {
   }, [playerProfileHidden]);
 
   React.useEffect(() => {
-    // Connect to the unified server at root (the port is handled transparently)
-    // Force direct websocket transport to prevent sticky-session/polling failures on Cloud Run
-    const s = io({
+    // Connect to the unified backend server.
+    // If running on custom domain (like trust-duel.vercel.app), connect to persistent Cloud Run URL.
+    // Otherwise, connect to current host origin (e.g. localhost or direct Cloud Run sandbox url).
+    const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+    const isCloudRun = window.location.hostname.includes("europe-west2.run.app");
+    
+    const socketServerUrl = (isLocalhost || isCloudRun) 
+      ? undefined 
+      : "https://ais-pre-vjhe7nt56td4wo5e5xdszz-730156147031.europe-west2.run.app";
+
+    console.log("Connecting WebSocket to domain:", socketServerUrl || "current host");
+
+    const s = io(socketServerUrl, {
       transports: ["websocket"],
       upgrade: false,
-      reconnectionAttempts: 5,
-      timeout: 10000
+      reconnectionAttempts: 15,
+      timeout: 12000
     });
     setSocket(s);
 
@@ -459,14 +470,22 @@ export default function App() {
     if (isSearching) {
       setSearchDuration(0);
       interval = setInterval(() => {
-        setSearchDuration((d) => d + 1);
+        setSearchDuration((d) => {
+          const next = d + 1;
+          if (next >= 15) {
+            // Automatically launch bot fallback match if search exceeds 15 seconds
+            setTimeout(() => {
+              forceBotMatch();
+            }, 50);
+          }
+          return next;
+        });
       }, 1000);
     }
     return () => clearInterval(interval);
   }, [isSearching]);
 
   const startMatchmaking = () => {
-    if (!socket) return;
     if (balance < ENTRY_FEE) {
       triggerHaptic("error");
       setMessage("Недостаточно средств на балансе для внесения залога.");
@@ -477,38 +496,117 @@ export default function App() {
     setMatchResultState(null);
     setOpponentSubmitted(false);
     setIsWaitingForOpponent(false);
+    setIsClientSideBotMatch(false);
     
-    const rate = playerGames ? Math.round((playerBetrayals / playerGames) * 100) : 0;
-    
-    // Register details in matchmaking queue
-    socket.emit("join-queue", {
-      name: tgUser ? (tgUser.username ? `@${tgUser.username}` : tgUser.first_name) : `Игрок_${socket.id?.substring(0, 4) || "You"}`,
-      games: playerGames,
-      betrayals: playerBetrayals,
-      avatar: tgUser ? "📱" : "👤",
-      style: rate > 60 ? "агрессивный" : rate < 20 ? "осторожный" : "хаотичный",
-      profileHidden: playerProfileHidden,
-      balance: balance
-    });
-    setMessage("Поиск оппонента в защищенном пуле Лиги Доверия...");
+    if (socket && isSocketConnected) {
+      const rate = playerGames ? Math.round((playerBetrayals / playerGames) * 100) : 0;
+      // Register details in matchmaking queue in real-time server
+      socket.emit("join-queue", {
+        name: tgUser ? (tgUser.username ? `@${tgUser.username}` : tgUser.first_name) : `Игрок_${socket.id?.substring(0, 4) || "You"}`,
+        games: playerGames,
+        betrayals: playerBetrayals,
+        avatar: tgUser ? "📱" : "👤",
+        style: rate > 60 ? "агрессивный" : rate < 20 ? "осторожный" : "хаотичный",
+        profileHidden: playerProfileHidden,
+        balance: balance
+      });
+      setMessage("Поиск оппонента в защищенном пуле Лиги Доверия...");
+    } else {
+      setMessage("Локальный поиск оппонента в Лиге Доверия...");
+    }
   };
 
   const cancelMatchmaking = () => {
-    if (!socket) return;
     triggerHaptic("light");
-    socket.emit("leave-queue");
+    if (socket && isSocketConnected) {
+      socket.emit("leave-queue");
+    }
     setIsSearching(false);
     setMessage("Поиск оппонента отменен.");
   };
 
   const submitMatchAction = (action: "cooperate" | "betray") => {
-    if (!socket || !activeMatch) return;
+    if (!activeMatch) return;
     triggerHaptic("medium");
-    socket.emit("submit-action", {
-      roomId: activeMatch.roomId,
-      action
-    });
-    setMessage("Твой выбор зафиксирован. Ожидаем решения оппонента...");
+
+    if (isClientSideBotMatch) {
+      setIsWaitingForOpponent(true);
+      setMessage("Твой выбор зафиксирован. Ожидаем решения ИИ-оппонента...");
+      
+      // Simulate Bot Decision with realistic latency of 1200ms
+      setTimeout(() => {
+        const oppName = activeMatch.opponent.name;
+        const oppAvatar = activeMatch.opponent.avatar;
+        
+        // Decide bot action based on betray rate
+        const rate = activeMatch.opponent.games ? activeMatch.opponent.betrayals / activeMatch.opponent.games : 0.5;
+        const opponentAction = Math.random() < rate ? "betray" : "cooperate";
+        
+        const result = resolveRound(action, opponentAction);
+        
+        // Update local balance and stats
+        setBalance((v) => Number((v - ENTRY_FEE + result.payout).toFixed(2)));
+        setPlayerGames((v) => v + 1);
+        if (action === "betray") {
+          setPlayerBetrayals((v) => v + 1);
+        }
+
+        // Keep local opponent database updated too
+        setOpponents((prev) =>
+          prev.map((o) =>
+            o.name === oppName
+              ? {
+                  ...o,
+                  games: o.games + 1,
+                  betrayals: o.betrayals + (opponentAction === "betray" ? 1 : 0),
+                }
+              : o
+          )
+        );
+
+        const newBalance = Number((balanceRef.current - ENTRY_FEE + result.payout).toFixed(2));
+
+        const row: HistoryRow = {
+          id: Date.now(),
+          opponent: opponentAction === "betray" ? `[Duel] ${oppName} (ПРЕДАТЕЛЬ)` : `[Duel] ${oppName} (ДОВЕРИЕ)`,
+          avatar: oppAvatar,
+          playerAction: action,
+          opponentAction: opponentAction,
+          payout: result.payout,
+          net: Number((result.payout - ENTRY_FEE).toFixed(2)),
+          title: result.title,
+          balance: newBalance,
+          economy: result.economy,
+          profileHiddenDuringRound: playerProfileHiddenRef.current,
+        };
+
+        setHistory((prev) => [row, ...prev].slice(0, 10));
+
+        setMatchResultState({
+          playerAction: action,
+          opponentAction: opponentAction,
+          payout: result.payout,
+          opponentPayout: result.opponentPayout,
+          title: result.title,
+          text: result.text,
+          economy: result.economy,
+          net: row.net
+        });
+
+        setIsWaitingForOpponent(false);
+        triggerHaptic("medium");
+        setMessage(`Локальная дуэль завершена: ${result.title}. ${result.text}`);
+      }, 1200);
+      return;
+    }
+
+    if (socket && isSocketConnected) {
+      socket.emit("submit-action", {
+        roomId: activeMatch.roomId,
+        action
+      });
+      setMessage("Твой выбор зафиксирован. Ожидаем решения оппонента...");
+    }
   };
 
   const completeMatch = () => {
@@ -517,39 +615,80 @@ export default function App() {
     setMatchResultState(null);
     setOpponentSubmitted(false);
     setIsWaitingForOpponent(false);
+    setIsClientSideBotMatch(false);
     setMessage("Вы вернулись в лобби дуэлей. Готовы к следующему поиску?");
   };
 
   const searchAnotherOpponent = () => {
-    if (!socket) return;
     triggerHaptic("medium");
-    if (activeMatch) {
+    if (activeMatch && socket && isSocketConnected && !isClientSideBotMatch) {
       socket.emit("leave-room", { roomId: activeMatch.roomId });
     }
     setActiveMatch(null);
     setMatchResultState(null);
     setOpponentSubmitted(false);
     setIsWaitingForOpponent(false);
+    setIsClientSideBotMatch(false);
     
     // Now trigger matchmaking immediately
     setIsSearching(true);
     setSearchDuration(0);
-    const rate = playerGames ? Math.round((playerBetrayals / playerGames) * 100) : 0;
-    
-    socket.emit("join-queue", {
-      name: tgUser ? (tgUser.username ? `@${tgUser.username}` : tgUser.first_name) : `Игрок_${socket.id?.substring(0, 4) || "You"}`,
-      games: playerGames,
-      betrayals: playerBetrayals,
-      avatar: tgUser ? "📱" : "👤",
-      style: rate > 60 ? "агрессивный" : rate < 20 ? "осторожный" : "хаотичный",
-      profileHidden: playerProfileHidden,
-      balance: balance
-    });
-    setMessage("Поиск нового оппонента в защищенном пуле Лиги Доверия...");
+
+    if (socket && isSocketConnected) {
+      const rate = playerGames ? Math.round((playerBetrayals / playerGames) * 100) : 0;
+      socket.emit("join-queue", {
+        name: tgUser ? (tgUser.username ? `@${tgUser.username}` : tgUser.first_name) : `Игрок_${socket.id?.substring(0, 4) || "You"}`,
+        games: playerGames,
+        betrayals: playerBetrayals,
+        avatar: tgUser ? "📱" : "👤",
+        style: rate > 60 ? "агрессивный" : rate < 20 ? "осторожный" : "хаотичный",
+        profileHidden: playerProfileHidden,
+        balance: balance
+      });
+      setMessage("Поиск нового оппонента в защищенном пуле Лиги Доверия...");
+    } else {
+      setMessage("Локальный поиск оппонента в Лиге Доверия...");
+    }
   };
 
   const forceBotMatch = () => {
-    if (!socket) return;
+    // Elegant client-side fallback if socket is disconnected/not yet ready
+    if (!socket || !isSocketConnected) {
+      triggerHaptic("medium");
+      setIsClientSideBotMatch(true);
+      setIsSearching(false);
+
+      const bots = [
+        { name: "QuietFox", games: 43, betrayals: 7, avatar: "🦊", style: "осторожный", profileHidden: false, rate: 16 },
+        { name: "IronSmile", games: 88, betrayals: 61, avatar: "😈", style: "агрессивный", profileHidden: true, rate: 69 },
+        { name: "MiraTrust", games: 27, betrayals: 2, avatar: "🕊️", style: "доверчивый", profileHidden: false, rate: 7 },
+        { name: "ZeroLuck", games: 112, betrayals: 54, avatar: "🎲", style: "хаотичный", profileHidden: false, rate: 48 },
+        { name: "BankerCat", games: 64, betrayals: 18, avatar: "🐈", style: "прагматичный", profileHidden: false, rate: 28 },
+        { name: "RedWolf", games: 151, betrayals: 119, avatar: "🐺", style: "хищник", profileHidden: true, rate: 79 },
+      ];
+      const bot = bots[Math.floor(Math.random() * bots.length)];
+
+      setActiveMatch({
+        roomId: `local_bot_${Date.now()}`,
+        opponent: {
+          id: `local_bot`,
+          name: bot.name,
+          games: bot.games,
+          betrayals: bot.betrayals,
+          avatar: bot.avatar,
+          style: bot.style,
+          profileHidden: bot.profileHidden,
+          balance: 20
+        },
+        yourRole: "player1"
+      });
+      setOpponentSubmitted(false);
+      setIsWaitingForOpponent(false);
+      setMatchResultState(null);
+      setMessage("Запущен офлайн-матч с ИИ-ботом Лиги доверия!");
+      return;
+    }
+
     triggerHaptic("medium");
     const rate = playerGames ? Math.round((playerBetrayals / playerGames) * 100) : 0;
     socket.emit("force-bot-match", {
